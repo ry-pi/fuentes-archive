@@ -2,8 +2,11 @@ name: Unsigned IPA
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   fixtures:
@@ -20,6 +23,8 @@ jobs:
   live:
     name: Live Rumble check
     runs-on: ubuntu-latest
+    # Cloudflare often blocks GitHub-hosted runners. The IPA job does not wait on this.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,3 +65,17 @@ jobs:
             build/FuentesArchive-unsigned.ipa
             sidestore/apps.json
           if-no-files-found: error
+      - name: Publish rolling GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # One rolling release so this URL always fetches the newest IPA:
+          # https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            --target "${GITHUB_SHA}" \
+            --title "Latest unsigned IPA" \
+            --notes "Unsigned Fuentes Archive build from ${GITHUB_SHA}. Install with SideStore. The asset name is stable: FuentesArchive-unsigned.ipa." \
+            --latest \
+            build/FuentesArchive-unsigned.ipa

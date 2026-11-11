@@ -131,13 +131,12 @@ A free Apple ID signature lasts about **7 days**. SideStore has to refresh the a
 
 ### Add it as a SideStore source (for updates)
 
-`sidestore/apps.json` is an AltStore/SideStore source. `downloadURL` and `iconURL` are placeholders (`https://REPLACE_WITH_YOUR_HOST/...`). SideStore can only refresh from a real HTTPS URL.
+`sidestore/apps.json` is an AltStore/SideStore source. The app binary is the rolling GitHub Release asset:
 
-1. Host `FuentesArchive-unsigned.ipa` and `sidestore/icon-1024.png` somewhere HTTPS.
-2. Edit `sidestore/apps.json`: set `downloadURL`, `iconURL`, and `size` (bytes of the IPA).
-3. Host `apps.json` at a stable URL.
-4. In SideStore: **Sources → +** and paste that URL.
-5. Later versions: bump `version` / `buildVersion`, point `downloadURL` at the new IPA, and SideStore’s refresh will offer the update. The bundle id must stay `com.local.fuentesarchive`.
+- IPA: https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa
+- Source: https://raw.githubusercontent.com/ry-pi/fuentes-archive/main/sidestore/apps.json
+
+In SideStore: **Sources → +** and paste the source URL. The bundle id must stay `com.local.fuentesarchive`. Each successful Actions run on `main` replaces the `latest` release, so that IPA URL keeps pointing at the newest unsigned build.
 
 You do not need the source to install the first copy. The source is only for updates.
 
