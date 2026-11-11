@@ -23,7 +23,10 @@ jobs:
   live:
     name: Live Rumble check
     runs-on: ubuntu-latest
-    # Cloudflare often blocks GitHub-hosted runners. The IPA job does not wait on this.
+    # GitHub-hosted IPs are often Cloudflare-blocked by rumble.com.
+    # A challenge skips the live assertions (exit 0). continue-on-error
+    # keeps any other live failure from failing the workflow.
+    # The IPA job must not list this job under `needs`.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +38,7 @@ jobs:
 
   ipa:
     name: Build unsigned IPA
+    # Intentionally has no `needs:`. A failed or skipped live check must not block the IPA.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4

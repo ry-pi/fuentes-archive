@@ -414,17 +414,19 @@ final class AppModel: ObservableObject {
         case let .finished(url, quality):
             let relative = "Videos/" + url.lastPathComponent
             LibraryStore.shared.update { state in
-                state.videos[id]?.status = .downloaded
-                state.videos[id]?.progress = 1
-                state.videos[id]?.relativePath = relative
-                state.videos[id]?.qualityLabel = quality
-            state.videos[id]?.errorMessage = nil
-            state.videos[id]?.attemptCount = 0
-            state.videos[id]?.segmentDone = state.videos[id]?.segmentTotal ?? 0
-            state.videos[id]?.updatedAt = Date()
-        }
-        log(source: "download", message: "Saved \(snapshot.videos[id]?.title ?? id).", level: "info")
-        pump()
+                guard var record = state.videos[id] else { return }
+                record.status = .downloaded
+                record.progress = 1
+                record.relativePath = relative
+                record.qualityLabel = quality
+                record.errorMessage = nil
+                record.attemptCount = 0
+                record.segmentDone = record.segmentTotal
+                record.updatedAt = Date()
+                state.videos[id] = record
+            }
+            log(source: "download", message: "Saved \(snapshot.videos[id]?.title ?? id).", level: "info")
+            pump()
             if snapshot.settings.notify {
                 NotificationService.notify(title: "Video saved", body: snapshot.videos[id]?.title ?? "Download finished")
             }
