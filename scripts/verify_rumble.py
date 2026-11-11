@@ -36,7 +36,6 @@ from rumble_parse import (  # noqa: E402
     segment_bytes,
     select_master_variant,
     select_variant,
-    should_auto_queue,
     should_retry,
     variants_from_player,
 )
@@ -106,36 +105,18 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(page.items, [])
 
     def test_auto_queue_rules(self) -> None:
-        self.assertFalse(
-            should_auto_queue(
-                is_new=True, page_index=0, published="2026-11-11T00:00:00+00:00",
-                disposition="downloadable", baseline=True, auto_on=True, watermark=None,
-            )
-        )
-        self.assertTrue(
-            should_auto_queue(
-                is_new=True, page_index=0, published="2026-11-01T00:00:00+00:00",
-                disposition="downloadable", baseline=False, auto_on=True, watermark="2026-11-10T00:00:00+00:00",
-            )
-        )
-        self.assertFalse(
-            should_auto_queue(
-                is_new=True, page_index=2, published="2026-10-01T00:00:00+00:00",
-                disposition="downloadable", baseline=False, auto_on=True, watermark="2026-11-10T00:00:00+00:00",
-            )
-        )
-        self.assertTrue(
-            should_auto_queue(
-                is_new=True, page_index=2, published="2026-11-12T00:00:00+00:00",
-                disposition="downloadable", baseline=False, auto_on=True, watermark="2026-11-10T00:00:00+00:00",
-            )
-        )
-        self.assertFalse(
-            should_auto_queue(
-                is_new=True, page_index=0, published="2026-11-12T00:00:00+00:00",
-                disposition="members", baseline=False, auto_on=True, watermark=None,
-            )
-        )
+        from rumble_parse import plan_sync
+        new = {"id": "new", "disposition": "downloadable"}
+        old = {"id": "old", "disposition": "downloadable"}
+        member = {"id": "member", "disposition": "members"}
+        spilled = {"id": "spilled", "disposition": "downloadable"}
+        queue, seen = plan_sync([[new, member], [spilled, old], [old]], {"old"}, baseline=False, auto_on=True, max_pages=10)
+        self.assertEqual(queue, ["new", "spilled"])
+        self.assertEqual(seen, ["new", "member", "spilled"])
+        baseline_queue, baseline_seen = plan_sync([[new]], set(), baseline=True, auto_on=True, max_pages=2)
+        self.assertEqual(baseline_queue, [])
+        self.assertEqual(baseline_seen, ["new"])
+        self.assertEqual(plan_sync([[old]], {"old"}, baseline=False, auto_on=True, max_pages=10)[0], [])
 
 
 class StreamTests(unittest.TestCase):
@@ -214,6 +195,22 @@ class StreamTests(unittest.TestCase):
         self.assertFalse(should_retry(404, 0))
         self.assertTrue(should_retry(403, 1))
         self.assertFalse(should_retry(503, 5))
+
+    def test_remux_real_segment_decodes(self) -> None:
+        import shutil
+        import subprocess
+        from ts_remux import remux
+        source = FIXTURES / "segment.ts"
+        destination = Path("/tmp/archive-remux-test.mp4")
+        media = remux([source], destination)
+        self.assertEqual((media.width, media.height), (640, 360))
+        self.assertGreater(len(media.video), 50)
+        self.assertGreater(len(media.audio), 50)
+        if shutil.which("ffmpeg"):
+            subprocess.check_call(
+                ["ffmpeg", "-v", "error", "-i", str(destination), "-f", "null", "-"],
+                stdout=subprocess.DEVNULL,
+            )
 
 
 class LiveTests(unittest.TestCase):

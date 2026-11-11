@@ -13,6 +13,7 @@ APP = [
     "FuentesArchive/Parsing/HTMLScanner.swift",
     "FuentesArchive/Parsing/ListingParser.swift",
     "FuentesArchive/Parsing/StreamResolver.swift",
+    "FuentesArchive/Parsing/TSRemuxer.swift",
     "FuentesArchive/Services/AppModel.swift",
     "FuentesArchive/Services/BackgroundScheduler.swift",
     "FuentesArchive/Services/DownloadManager.swift",

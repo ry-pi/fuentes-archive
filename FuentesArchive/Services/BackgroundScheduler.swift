@@ -24,14 +24,14 @@ enum BackgroundScheduler {
     }
 
     private static func handle(_ task: BGTask, trigger: String) {
-        scheduleAll()
         let work = Task { @MainActor in
             await AppModel.shared.syncAndWait(trigger: trigger)
         }
         task.expirationHandler = { work.cancel() }
         Task {
             _ = await work.value
-            task.setTaskCompleted(success: true)
+            task.setTaskCompleted(success: !work.isCancelled)
+            scheduleAll()
         }
     }
 
@@ -80,6 +80,7 @@ enum PhotosLibrary {
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        _ = AppModel.shared
         DownloadManager.shared.reconnect()
         BackgroundScheduler.register()
         BackgroundScheduler.scheduleAll()
@@ -90,9 +91,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        _ = AppModel.shared
         if identifier == DownloadManager.sessionID {
             DownloadManager.shared.reconnect()
-            DownloadManager.shared.backgroundCompletion = completionHandler
+            DownloadManager.shared.setBackgroundCompletion(completionHandler)
         } else {
             completionHandler()
         }

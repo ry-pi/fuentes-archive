@@ -53,12 +53,50 @@ final class ArchiveTests: XCTestCase {
         XCTAssertTrue(page.items.isEmpty)
     }
 
-    func testAutoQueueDoesNotBackfillOlderPages() {
-        XCTAssertFalse(AutoQueue.shouldQueue(isNew: true, pageIndex: 0, published: "2026-11-11T00:00:00+00:00", disposition: .downloadable, baseline: true, autoOn: true, watermark: nil))
-        XCTAssertTrue(AutoQueue.shouldQueue(isNew: true, pageIndex: 0, published: "2026-11-01T00:00:00+00:00", disposition: .downloadable, baseline: false, autoOn: true, watermark: "2026-11-10T00:00:00+00:00"))
-        XCTAssertFalse(AutoQueue.shouldQueue(isNew: true, pageIndex: 2, published: "2026-10-01T00:00:00+00:00", disposition: .downloadable, baseline: false, autoOn: true, watermark: "2026-11-10T00:00:00+00:00"))
-        XCTAssertTrue(AutoQueue.shouldQueue(isNew: true, pageIndex: 2, published: "2026-11-12T00:00:00+00:00", disposition: .downloadable, baseline: false, autoOn: true, watermark: "2026-11-10T00:00:00+00:00"))
-        XCTAssertFalse(AutoQueue.shouldQueue(isNew: true, pageIndex: 0, published: nil, disposition: .members, baseline: false, autoOn: true, watermark: nil))
+    func testSyncPlanKeepsBackCatalogAndStillCatchesSpill() {
+        let new = SyncVideo(id: "new", disposition: .downloadable)
+        let old = SyncVideo(id: "old", disposition: .downloadable)
+        let member = SyncVideo(id: "member", disposition: .members)
+        let spilled = SyncVideo(id: "spilled", disposition: .downloadable)
+        let decision = AutoQueue.plan(
+            pages: [[new, member], [spilled, old], [old]],
+            known: ["old"],
+            baseline: false,
+            autoOn: true,
+            maxPages: 10
+        )
+        XCTAssertEqual(decision.queue, ["new", "spilled"])
+        XCTAssertEqual(decision.seen, ["new", "member", "spilled"])
+        let baseline = AutoQueue.plan(pages: [[new]], known: [], baseline: true, autoOn: true, maxPages: 2)
+        XCTAssertTrue(baseline.queue.isEmpty)
+        XCTAssertEqual(baseline.seen, ["new"])
+        let quiet = AutoQueue.plan(pages: [[old]], known: ["old"], baseline: false, autoOn: true, maxPages: 10)
+        XCTAssertTrue(quiet.queue.isEmpty)
+    }
+
+    func testRemuxesRealSegmentToMP4() throws {
+        let source = try XCTUnwrap(Bundle(for: ArchiveTests.self).url(forResource: "segment", withExtension: "ts"))
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("remux-test.mp4")
+        let info = try TSRemuxer.remux(files: [source], to: destination)
+        XCTAssertEqual(info.width, 640)
+        XCTAssertEqual(info.height, 360)
+        XCTAssertGreaterThan(info.videoSamples, 50)
+        XCTAssertGreaterThan(info.audioSamples, 50)
+        let header = try Data(contentsOf: destination).prefix(8)
+        XCTAssertEqual(String(decoding: header.dropFirst(4), as: UTF8.self), "ftyp")
+        let blob = try Data(contentsOf: destination)
+        XCTAssertTrue(blob.range(of: Data("avc1".utf8)) != nil)
+        XCTAssertTrue(blob.range(of: Data("mp4a".utf8)) != nil)
+        try? FileManager.default.removeItem(at: destination)
+    }
+
+    func testPlaylistRelativeURLKeepsTheTarQuery() {
+        let base = URL(string: "https://hugh.cdn.rumble.cloud/video/a/A6eaB.oaa.tar?r_file=chunklist.m3u8&r_range=1-2")!
+        let resolved = HLSPlaylist.resolve("A6eaB.oaa.tar?r_file=media-0.ts&r_type=video%2Fmp2t&r_range=512-296423", base: base)
+        XCTAssertEqual(
+            resolved?.absoluteString,
+            "https://hugh.cdn.rumble.cloud/video/a/A6eaB.oaa.tar?r_file=media-0.ts&r_type=video%2Fmp2t&r_range=512-296423"
+        )
     }
 
     func testProgressiveMP4BeatsWebM() throws {

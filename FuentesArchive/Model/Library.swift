@@ -117,9 +117,12 @@ struct LibraryState: Codable, Equatable {
     var lastError: String?
     var log: [LogEntry] = []
     var ignoredIDs: [String] = []
+    /// Ids ever seen, including ones the user hid. Stops a restore or a later
+    /// page scan from treating the back catalog as brand new.
+    var knownIDs: [String] = []
 
     enum CodingKeys: String, CodingKey {
-        case videos, settings, watermark, baselineReady, lastSync, lastError, log, ignoredIDs
+        case videos, settings, watermark, baselineReady, lastSync, lastError, log, ignoredIDs, knownIDs
     }
 
     init() {}
@@ -134,6 +137,10 @@ struct LibraryState: Codable, Equatable {
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
         log = try container.decodeIfPresent([LogEntry].self, forKey: .log) ?? []
         ignoredIDs = try container.decodeIfPresent([String].self, forKey: .ignoredIDs) ?? []
+        knownIDs = try container.decodeIfPresent([String].self, forKey: .knownIDs) ?? []
+        if baselineReady && knownIDs.isEmpty {
+            knownIDs = Array(videos.keys)
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -146,6 +153,7 @@ struct LibraryState: Codable, Equatable {
         try container.encodeIfPresent(lastError, forKey: .lastError)
         try container.encode(log, forKey: .log)
         try container.encode(ignoredIDs, forKey: .ignoredIDs)
+        try container.encode(knownIDs, forKey: .knownIDs)
     }
 }
 
@@ -167,6 +175,12 @@ final class LibraryStore {
         if let data = try? Data(contentsOf: libraryURL),
            let decoded = try? JSONDecoder.archive.decode(LibraryState.self, from: data) {
             state = decoded
+            if state.baselineReady && state.knownIDs.isEmpty && !state.videos.isEmpty {
+                state.knownIDs = Array(state.videos.keys)
+                if let encoded = try? JSONEncoder.archive.encode(state) {
+                    try? encoded.write(to: libraryURL, options: .atomic)
+                }
+            }
         }
     }
 

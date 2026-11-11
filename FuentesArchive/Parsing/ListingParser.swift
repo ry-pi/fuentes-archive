@@ -207,24 +207,37 @@ enum ListingParser {
     }
 }
 
+struct SyncVideo: Equatable {
+    var id: String
+    var disposition: Disposition
+}
+
 enum AutoQueue {
-    /// First sync records the catalog. Later syncs download page-1 arrivals
-    /// and anything published after the watermark. Older pages are not a backfill.
-    static func shouldQueue(
-        isNew: Bool,
-        pageIndex: Int,
-        published: String?,
-        disposition: Disposition,
+    /// Walk pages until one is entirely videos we already know.
+    /// Every new public video before that boundary is queued, including ones
+    /// that spilled past page 1. Older pages are never a silent backfill.
+    static func plan(
+        pages: [[SyncVideo]],
+        known: Set<String>,
         baseline: Bool,
         autoOn: Bool,
-        watermark: String?
-    ) -> Bool {
-        guard autoOn, !baseline, isNew, disposition == .downloadable else { return false }
-        if pageIndex == 0 { return true }
-        guard let published, let watermark,
-              let publishedDate = parse(published),
-              let watermarkDate = parse(watermark) else { return false }
-        return publishedDate > watermarkDate
+        maxPages: Int
+    ) -> (queue: [String], seen: [String]) {
+        var known = known
+        var queue: [String] = []
+        var seen: [String] = []
+        for page in pages.prefix(max(1, maxPages)) {
+            if page.isEmpty { break }
+            if page.allSatisfy({ known.contains($0.id) }) { break }
+            for item in page where !known.contains(item.id) {
+                seen.append(item.id)
+                known.insert(item.id)
+                if autoOn && !baseline && item.disposition == .downloadable {
+                    queue.append(item.id)
+                }
+            }
+        }
+        return (queue, seen)
     }
 
     static func parse(_ value: String) -> Date? {

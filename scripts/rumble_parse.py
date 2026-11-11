@@ -578,29 +578,29 @@ def _attr_int(line: str, name: str) -> int:
         return 0
 
 
-def should_auto_queue(
-    *,
-    is_new: bool,
-    page_index: int,
-    published: Optional[str],
-    disposition: str,
-    baseline: bool,
-    auto_on: bool,
-    watermark: Optional[str],
-) -> bool:
-    """Decide whether a sync should start a download.
+def plan_sync(pages, known, *, baseline, auto_on, max_pages):
+    """Queue every new public video until a page is entirely already known.
 
-    The first successful sync only records what is already on the channel.
-    Later syncs download videos that show up on page 1, or whose publish
-    time is newer than the watermark. Loading older pages does not backfill.
+    A burst that spills past page 1 is still downloaded. Raising the page
+    limit later does not download the back catalog, because the walk stops
+    at the first page of videos that were seen before.
     """
-    if not auto_on or baseline or not is_new or disposition != DOWNLOADABLE:
-        return False
-    if page_index == 0:
-        return True
-    if published and watermark and _parse_time(published) > _parse_time(watermark):
-        return True
-    return False
+    known = set(known)
+    queue = []
+    seen = []
+    for page in list(pages)[: max(1, max_pages)]:
+        if not page:
+            break
+        if all(item["id"] in known for item in page):
+            break
+        for item in page:
+            if item["id"] in known:
+                continue
+            seen.append(item["id"])
+            known.add(item["id"])
+            if auto_on and not baseline and item.get("disposition") == DOWNLOADABLE:
+                queue.append(item["id"])
+    return queue, seen
 
 
 def _parse_time(value: str) -> datetime:

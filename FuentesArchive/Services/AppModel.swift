@@ -8,7 +8,7 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var snapshot = LibraryState()
     @Published private(set) var syncing = false
-    @Published private(set) var onWiFi = true
+    @Published private(set) var onWiFi = false
     @Published var sort: LibrarySort = .newest
     @Published var filter: LibraryFilter = .all
     @Published var search = ""
@@ -17,12 +17,19 @@ final class AppModel: ObservableObject {
     private let monitor = NWPathMonitor()
     private var activeSync: Task<Void, Never>?
     private var lastProgressWrite: [String: Date] = [:]
+    private var pathReady = false
+    private var retryWork: DispatchWorkItem?
 
     private init() {
         snapshot = LibraryStore.shared.snapshot()
         LibraryStore.shared.onChange = { [weak self] in
-            Task { @MainActor in
+            let apply = {
                 self?.snapshot = LibraryStore.shared.snapshot()
+            }
+            if Thread.isMainThread {
+                MainActor.assumeIsolated(apply)
+            } else {
+                DispatchQueue.main.async { MainActor.assumeIsolated(apply) }
             }
         }
         DownloadManager.shared.onEvent = { [weak self] id, event in
@@ -34,12 +41,21 @@ final class AppModel: ObservableObject {
         monitor.pathUpdateHandler = { [weak self] path in
             let unmetered = path.status == .satisfied && !path.isExpensive && !path.isConstrained
             Task { @MainActor in
-                self?.onWiFi = unmetered
-                self?.pump()
+                guard let self else { return }
+                let first = !self.pathReady
+                self.pathReady = true
+                self.onWiFi = unmetered
+                if first {
+                    self.resumeInterrupted()
+                } else if self.snapshot.settings.wifiOnly && !unmetered {
+                    self.pauseForNetwork()
+                } else {
+                    self.pump()
+                }
             }
         }
         monitor.start(queue: DispatchQueue(label: "archive.network"))
-        resumeInterrupted()
+        scheduleRetries()
     }
 
     var settings: Settings { snapshot.settings }
@@ -111,8 +127,10 @@ final class AppModel: ObservableObject {
     }
 
     func downloadNewest(_ count: Int) {
-        let ids = videos()
-            .filter { $0.disposition == .downloadable && $0.status != .downloaded && $0.status != .downloading }
+        let ignored = Set(snapshot.ignoredIDs)
+        let ids = snapshot.videos.values
+            .filter { !ignored.contains($0.id) && $0.disposition == .downloadable && $0.status != .downloaded && $0.status != .downloading }
+            .sorted { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
             .prefix(count)
             .map(\.id)
         ids.forEach { download($0, resetAttempts: true) }
@@ -131,6 +149,8 @@ final class AppModel: ObservableObject {
             state.videos[id]?.relativePath = nil
             state.videos[id]?.progress = 0
             state.videos[id]?.bytesWritten = 0
+            state.videos[id]?.segmentDone = 0
+            state.videos[id]?.segmentTotal = 0
             state.videos[id]?.errorMessage = nil
             state.videos[id]?.updatedAt = Date()
         }
@@ -155,7 +175,11 @@ final class AppModel: ObservableObject {
 
     func updateSettings(_ body: (inout Settings) -> Void) {
         LibraryStore.shared.update { body(&$0.settings) }
-        pump()
+        if snapshot.settings.wifiOnly && pathReady && !onWiFi {
+            pauseForNetwork()
+        } else {
+            pump()
+        }
     }
 
     func dismissIntro() {
@@ -193,45 +217,46 @@ final class AppModel: ObservableObject {
         syncing = true
         defer { syncing = false }
         log(source: trigger, message: "Looking for new videos on the Videos tab.", level: "info")
-        let previouslyKnown = Set(snapshot.videos.keys)
         let baseline = !snapshot.baselineReady
         var pageURL = Channel.videosPage
-        var pageIndex = 0
         var maxPublished: Date?
         let pageLimit = min(10, max(1, snapshot.settings.maxPages))
+        let known = Set(snapshot.knownIDs)
         do {
-            while pageIndex < pageLimit {
+            var pages: [[ListedVideo]] = []
+            while pages.count < pageLimit {
                 if Task.isCancelled { return }
                 let html = try await client.fetchListing(pageURL)
                 let page = ListingParser.parse(html: html, pageURL: pageURL)
                 if page.challenged { throw RumbleError.cloudflare }
                 if page.items.isEmpty { break }
-                let watermark = snapshot.watermark.map { ISO8601DateFormatter().string(from: $0) }
-                for item in page.items where !snapshot.ignoredIDs.contains(item.id) {
-                    let isNew = snapshot.videos[item.id] == nil
-                    let previous = snapshot.videos[item.id]
-                    upsert(item)
-                    if item.disposition == .downloadable, let date = AutoQueue.parse(item.published ?? "") {
-                        maxPublished = max(maxPublished ?? date, date)
-                    }
-                    if AutoQueue.shouldQueue(
-                        isNew: isNew,
-                        pageIndex: pageIndex,
-                        published: item.published,
-                        disposition: item.disposition,
-                        baseline: baseline,
-                        autoOn: snapshot.settings.autoDownload,
-                        watermark: watermark
-                    ) {
-                        download(item.id)
-                    } else if previous?.status == .waiting, item.disposition == .downloadable, !baseline, snapshot.settings.autoDownload {
-                        download(item.id)
-                    }
-                }
-                let knownPage = page.items.allSatisfy { previouslyKnown.contains($0.id) }
-                pageIndex += 1
-                guard let next = page.nextURL, !knownPage else { break }
+                pages.append(page.items)
+                let seen = known.union(pages.dropLast().flatMap { $0.map(\.id) })
+                if page.items.allSatisfy({ seen.contains($0.id) }) { break }
+                guard let next = page.nextURL else { break }
                 pageURL = next
+            }
+            let decision = AutoQueue.plan(
+                pages: pages.map { $0.map { SyncVideo(id: $0.id, disposition: $0.disposition) } },
+                known: known,
+                baseline: baseline,
+                autoOn: snapshot.settings.autoDownload,
+                maxPages: pageLimit
+            )
+            let ignored = Set(snapshot.ignoredIDs)
+            for item in pages.flatMap({ $0 }) where !ignored.contains(item.id) {
+                let previous = snapshot.videos[item.id]
+                upsert(item)
+                if item.disposition == .downloadable, let date = AutoQueue.parse(item.published ?? "") {
+                    maxPublished = max(maxPublished ?? date, date)
+                }
+                if previous?.status == .waiting, item.disposition == .downloadable, !baseline, snapshot.settings.autoDownload,
+                   !decision.queue.contains(item.id) {
+                    download(item.id)
+                }
+            }
+            for id in decision.queue where !ignored.contains(id) {
+                download(id)
             }
             LibraryStore.shared.update { state in
                 if !state.baselineReady {
@@ -295,6 +320,9 @@ final class AppModel: ObservableObject {
             }
             record.updatedAt = Date()
             state.videos[item.id] = record
+            if !state.knownIDs.contains(item.id) {
+                state.knownIDs.append(item.id)
+            }
         }
     }
 
@@ -308,13 +336,15 @@ final class AppModel: ObservableObject {
     }
 
     private func pump() {
+        guard pathReady else { return }
         let allow = !snapshot.settings.wifiOnly || onWiFi
-        for record in snapshot.videos.values {
-            if record.status == .waitingForWiFi, allow {
-                start(record.id)
-            } else if record.status == .queued {
-                start(record.id)
-            }
+        let candidates = snapshot.videos.values.filter {
+            ($0.status == .waitingForWiFi && allow) || $0.status == .queued
+        }.sorted { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
+        for record in candidates {
+            let active = snapshot.videos.values.filter { $0.status == .downloading }.count
+            if active >= 2 { break }
+            start(record.id)
         }
     }
 
@@ -388,22 +418,34 @@ final class AppModel: ObservableObject {
                 state.videos[id]?.progress = 1
                 state.videos[id]?.relativePath = relative
                 state.videos[id]?.qualityLabel = quality
-                state.videos[id]?.errorMessage = nil
-                state.videos[id]?.attemptCount = 0
-                state.videos[id]?.updatedAt = Date()
-            }
-            log(source: "download", message: "Saved \(snapshot.videos[id]?.title ?? id).", level: "info")
+            state.videos[id]?.errorMessage = nil
+            state.videos[id]?.attemptCount = 0
+            state.videos[id]?.segmentDone = state.videos[id]?.segmentTotal ?? 0
+            state.videos[id]?.updatedAt = Date()
+        }
+        log(source: "download", message: "Saved \(snapshot.videos[id]?.title ?? id).", level: "info")
+        pump()
             if snapshot.settings.notify {
                 NotificationService.notify(title: "Video saved", body: snapshot.videos[id]?.title ?? "Download finished")
             }
             if snapshot.settings.saveToPhotos {
-                PhotosSaver.save(url) { result in
-                    Task { @MainActor in
-                        if case let .failure(error) = result {
-                            self.log(source: "photos", message: error.localizedDescription, level: "error")
+                if url.pathExtension.lowercased() == "mp4" {
+                    PhotosSaver.save(url) { result in
+                        Task { @MainActor in
+                            if case let .failure(error) = result {
+                                self.log(source: "photos", message: error.localizedDescription, level: "error")
+                            }
                         }
                     }
+                } else {
+                    log(source: "photos", message: "Photos did not get a copy because the file stayed MPEG-TS. It is in Files and plays in the app.", level: "error")
                 }
+            }
+        case .paused:
+            LibraryStore.shared.update { state in
+                guard state.videos[id]?.status == .downloading || state.videos[id]?.status == .queued else { return }
+                state.videos[id]?.status = .waitingForWiFi
+                state.videos[id]?.errorMessage = "Waiting for Wi-Fi."
             }
         case let .failed(message, status):
             fail(id, message: message, status: status)
@@ -426,6 +468,8 @@ final class AppModel: ObservableObject {
             state.videos[id] = record
         }
         log(source: "download", message: "\(snapshot.videos[id]?.title ?? id): \(message)", level: "error")
+        scheduleRetries()
+        pump()
     }
 
     private func retryDue() {
@@ -437,14 +481,46 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func pauseForNetwork() {
+        for record in snapshot.videos.values where record.status == .downloading || record.status == .queued {
+            DownloadManager.shared.pause(videoID: record.id)
+        }
+    }
+
     private func resumeInterrupted() {
-        for record in snapshot.videos.values where record.status == .downloading {
-            let resumed = DownloadManager.shared.resume(videoID: record.id, title: record.title, allowCellular: !snapshot.settings.wifiOnly)
-            if !resumed {
-                LibraryStore.shared.update { $0.videos[record.id]?.status = .queued }
+        let allow = !snapshot.settings.wifiOnly || onWiFi
+        DownloadManager.shared.liveTasks { [weak self] live in
+            Task { @MainActor in
+                guard let self else { return }
+                let grouped = Dictionary(grouping: live, by: \.videoID)
+                for record in self.snapshot.videos.values where record.status == .downloading {
+                    if !allow {
+                        if grouped[record.id] == nil {
+                            LibraryStore.shared.update { $0.videos[record.id]?.status = .waitingForWiFi }
+                        }
+                        continue
+                    }
+                    if !DownloadManager.shared.resume(videoID: record.id, allowCellular: !self.snapshot.settings.wifiOnly, adopted: grouped[record.id] ?? []) {
+                        LibraryStore.shared.update { $0.videos[record.id]?.status = .queued }
+                    }
+                }
+                self.pump()
             }
         }
-        pump()
+    }
+
+    private func scheduleRetries() {
+        retryWork?.cancel()
+        let next = snapshot.videos.values.compactMap { record -> Date? in
+            guard record.status == .failed, let when = record.nextRetryAt else { return nil }
+            return when
+        }.min()
+        guard let next else { return }
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor in self?.retryDue() }
+        }
+        retryWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(1, next.timeIntervalSinceNow), execute: work)
     }
 
     private func listed(_ record: VideoRecord) -> ListedVideo {

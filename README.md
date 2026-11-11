@@ -26,7 +26,7 @@ The page also links pages 2, 3, 4, and 48 (25 videos per page).
 ## What it does
 
 - On launch, on pull-to-refresh, and from a background refresh, it reads the Videos tab and remembers every video it sees.
-- The first successful sync is a **baseline**. Videos already on the channel are listed and are not downloaded. Anything that shows up later on page 1 is queued automatically when auto-download is on. This is so the first launch does not try to save a thousand multi-gigabyte files.
+- The first successful sync is a **baseline**. Videos already on the channel are listed and are not downloaded. Later syncs walk forward until a page is entirely videos already seen, and queue every new public video in that span (so a burst that spills past page 1 is not missed). This is so the first launch does not try to save a thousand multi-gigabyte files. Hiding a video remembers its id, so restoring it does not immediately download it again.
 - You can download any listed video yourself, or tap **Download newest 5 / 10**. Settings has “on first sync, also download newest N”.
 - Files are written to the app’s Documents folder (`On My iPhone → Fuentes Archive → Videos`) because `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` are set. They show up in the Files app.
 - Optional: also copy a finished file into Photos. Off by default.
@@ -86,7 +86,7 @@ For each download:
 The player `ua` map has several kinds of URL:
 
 - **mp4 / webm** — one progressive file. Preferred when it exists (older uploads).
-- **tar** — a per-quality HLS media playlist stored as a byte range inside a `.tar`. Current Videos-tab uploads use this. The media segments are MPEG-TS (`video/mp2t`) and the ones checked here contain both H.264 and AAC, so concatenating them keeps the audio.
+- **tar** — a per-quality HLS media playlist stored as a byte range inside a `.tar`. Current Videos-tab uploads use this. The pieces are MPEG-TS with H.264 and AAC. They are remuxed into an MP4 after the download, not left as a raw concatenation unless remux fails.
 - **hls / auto** — a master playlist of those same tar playlists. Used if a sized rendition is missing.
 - **timeline** — a tiny MP4 scrub preview (about 11 kbps). It is an MP4 and it is **not** the movie. The resolver never selects it.
 - **audio** — a standalone AAC file. Not selected as the video.
@@ -190,7 +190,7 @@ Minimum system: iOS 17. iPhone and iPad.
 - **No IPA was produced in this environment.** There is no Xcode here. CI is set up to build it.
 - **Cloudflare** sits in front of channel HTML from a lot of datacenter addresses. Direct fetches of the Videos tab from this network returned 403. A reader proxy could render page 1 (that is how the live titles were confirmed) but not page 2. The app uses `URLSession` with a Safari user agent, which is a normal iPhone client and usually gets the HTML. If a network still shows the challenge, the library is left alone and the error is shown. An empty parse is not treated as “the channel deleted everything”.
 - **Page 2 of the live site** could not be rendered from here. Pagination is still covered: the live page-1 HTML has `rel=next` and links through page 48, and a same-crawl archive of page 2 (3 November 2026, 25 different videos, next page 3) is a fixture. The first title on that page is “I'M SICK OF THESE FREAKS!!!”, which is not on page 1 of that crawl.
-- **Current uploads are not progressive MP4s.** They are MPEG-TS pieces inside a tar-backed HLS playlist. The app concatenates those pieces into a `.ts` file. The in-app player uses `AVPlayer`. Photos often refuses `.ts`; the file remains in Files, and VLC will open it. Older uploads that still publish a real MP4 are saved as `.mp4` and can be copied to Photos.
+- **Current uploads are MPEG-TS inside a tar-backed HLS playlist.** After the pieces are on disk, the app remuxes them to a regular H.264/AAC MP4 (moov at the end, 64-bit offsets) so Photos and the in-app player get a normal movie. A real low-quality segment was remuxed here and `ffmpeg` decoded it (640×360, AAC). If remux fails, the app falls back to a concatenated `.ts` in Files and does not send that file to Photos.
 - **The timeline MP4 is a trap.** It looks like a video file and it is not the episode. Tests lock that it is never chosen.
 - **Background discovery is best-effort.** See above. Do not expect a new upload to appear within minutes if you never open the app.
 - **Wi-Fi only and disk space.** A single episode can be 1–4 GB. The default will wait for an unmetered, unconstrained network.

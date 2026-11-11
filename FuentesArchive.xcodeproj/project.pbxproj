@@ -12,6 +12,7 @@
 		5A9AFD38250CFBD84D4D4CDA /* HTMLScanner.swift */ = {isa = PBXBuildFile; fileRef = 38EAA61D04AF61539EFD39F4 /* HTMLScanner.swift */; };
 		049452BCD14C1B951EB998C0 /* ListingParser.swift */ = {isa = PBXBuildFile; fileRef = A8DF9F627CCD08ACC0AFE0E6 /* ListingParser.swift */; };
 		EFE4988F0321C7CB146D7902 /* StreamResolver.swift */ = {isa = PBXBuildFile; fileRef = 159A322B2B8195B3B6DCEC8B /* StreamResolver.swift */; };
+		D2CBF6AE19C91358F1BE3098 /* TSRemuxer.swift */ = {isa = PBXBuildFile; fileRef = 3A6215E73BC417CF2318FC00 /* TSRemuxer.swift */; };
 		9C1151590CBF20873286467C /* AppModel.swift */ = {isa = PBXBuildFile; fileRef = B5E5DA50FFEA8AFC09DC37D0 /* AppModel.swift */; };
 		5CE3FF9A88E9F790B9BCC788 /* BackgroundScheduler.swift */ = {isa = PBXBuildFile; fileRef = C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */; };
 		6B4FC8A9A8F88C0F7A7D6672 /* DownloadManager.swift */ = {isa = PBXBuildFile; fileRef = A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */; };
@@ -26,6 +27,7 @@
 		70875173A7ABC2E87D9DE488 /* player-alex.json */ = {isa = PBXBuildFile; fileRef = 31B1CF1956B1474AA5FA8735 /* player-alex.json */; };
 		2C3A56EF03413EBE19157C7F /* player-progressive.json */ = {isa = PBXBuildFile; fileRef = BE71042B8B9BDB3484A6FE3F /* player-progressive.json */; };
 		BEBA5AC4CAB871C083D09FF0 /* player-tar.json */ = {isa = PBXBuildFile; fileRef = 800E1F60EDF85FE3418E46A0 /* player-tar.json */; };
+		AB4848A5D3DA6A2E4D16E0DD /* segment.ts */ = {isa = PBXBuildFile; fileRef = 428ABABDB35217830E33C8F6 /* segment.ts */; };
 		14E559A1D66E5B421548FDED /* videos-grid-page2.html */ = {isa = PBXBuildFile; fileRef = B8FFB281CCC4BF12912760B7 /* videos-grid-page2.html */; };
 		4252C00FBCA541B9BC68EDBA /* videos-grid-server.html */ = {isa = PBXBuildFile; fileRef = DBCD8F4F0EC9ADF96B7A58E8 /* videos-grid-server.html */; };
 		2D96DAD1CA31CE89F5F716ED /* videos-tab-live.html */ = {isa = PBXBuildFile; fileRef = 52299295C9F0D86D167C1918 /* videos-tab-live.html */; };
@@ -49,6 +51,7 @@
 		38EAA61D04AF61539EFD39F4 /* HTMLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Parsing/HTMLScanner.swift"; sourceTree = "<group>"; };
 		A8DF9F627CCD08ACC0AFE0E6 /* ListingParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Parsing/ListingParser.swift"; sourceTree = "<group>"; };
 		159A322B2B8195B3B6DCEC8B /* StreamResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Parsing/StreamResolver.swift"; sourceTree = "<group>"; };
+		3A6215E73BC417CF2318FC00 /* TSRemuxer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Parsing/TSRemuxer.swift"; sourceTree = "<group>"; };
 		B5E5DA50FFEA8AFC09DC37D0 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/AppModel.swift"; sourceTree = "<group>"; };
 		C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/BackgroundScheduler.swift"; sourceTree = "<group>"; };
 		A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/DownloadManager.swift"; sourceTree = "<group>"; };
@@ -63,6 +66,7 @@
 		31B1CF1956B1474AA5FA8735 /* player-alex.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Fixtures/player-alex.json"; sourceTree = "<group>"; };
 		BE71042B8B9BDB3484A6FE3F /* player-progressive.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Fixtures/player-progressive.json"; sourceTree = "<group>"; };
 		800E1F60EDF85FE3418E46A0 /* player-tar.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Fixtures/player-tar.json"; sourceTree = "<group>"; };
+		428ABABDB35217830E33C8F6 /* segment.ts */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Fixtures/segment.ts"; sourceTree = "<group>"; };
 		B8FFB281CCC4BF12912760B7 /* videos-grid-page2.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "Fixtures/videos-grid-page2.html"; sourceTree = "<group>"; };
 		DBCD8F4F0EC9ADF96B7A58E8 /* videos-grid-server.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "Fixtures/videos-grid-server.html"; sourceTree = "<group>"; };
 		52299295C9F0D86D167C1918 /* videos-tab-live.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "Fixtures/videos-tab-live.html"; sourceTree = "<group>"; };
@@ -103,6 +107,7 @@
 				38EAA61D04AF61539EFD39F4 /* HTMLScanner.swift */,
 				A8DF9F627CCD08ACC0AFE0E6 /* ListingParser.swift */,
 				159A322B2B8195B3B6DCEC8B /* StreamResolver.swift */,
+				3A6215E73BC417CF2318FC00 /* TSRemuxer.swift */,
 				B5E5DA50FFEA8AFC09DC37D0 /* AppModel.swift */,
 				C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */,
 				A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */,
@@ -124,6 +129,7 @@
 				31B1CF1956B1474AA5FA8735 /* player-alex.json */,
 				BE71042B8B9BDB3484A6FE3F /* player-progressive.json */,
 				800E1F60EDF85FE3418E46A0 /* player-tar.json */,
+				428ABABDB35217830E33C8F6 /* segment.ts */,
 				B8FFB281CCC4BF12912760B7 /* videos-grid-page2.html */,
 				DBCD8F4F0EC9ADF96B7A58E8 /* videos-grid-server.html */,
 				52299295C9F0D86D167C1918 /* videos-tab-live.html */,
@@ -235,6 +241,7 @@
 				70875173A7ABC2E87D9DE488 /* player-alex.json */,
 				2C3A56EF03413EBE19157C7F /* player-progressive.json */,
 				BEBA5AC4CAB871C083D09FF0 /* player-tar.json */,
+				AB4848A5D3DA6A2E4D16E0DD /* segment.ts */,
 				14E559A1D66E5B421548FDED /* videos-grid-page2.html */,
 				4252C00FBCA541B9BC68EDBA /* videos-grid-server.html */,
 				2D96DAD1CA31CE89F5F716ED /* videos-tab-live.html */,
@@ -253,6 +260,7 @@
 				5A9AFD38250CFBD84D4D4CDA /* HTMLScanner.swift */,
 				049452BCD14C1B951EB998C0 /* ListingParser.swift */,
 				EFE4988F0321C7CB146D7902 /* StreamResolver.swift */,
+				D2CBF6AE19C91358F1BE3098 /* TSRemuxer.swift */,
 				9C1151590CBF20873286467C /* AppModel.swift */,
 				5CE3FF9A88E9F790B9BCC788 /* BackgroundScheduler.swift */,
 				6B4FC8A9A8F88C0F7A7D6672 /* DownloadManager.swift */,
