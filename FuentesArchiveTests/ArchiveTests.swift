@@ -29,12 +29,16 @@ final class ArchiveTests: XCTestCase {
 
     func testServerJSONDropsShortsLivesAndKeepsMembersAndPremieres() throws {
         let page = ListingParser.parse(html: try fixture("videos-grid-server.html"), pageURL: Channel.videosPage)
-        XCTAssertEqual(page.items.map { ($0.title, $0.disposition) }, [
-            ("MAKE THE GOYIM GREAT AGAIN!!!", .downloadable),
-            ("Governments Tell Citizens to Prepare for DISASTER", .downloadable),
-            ("Leftist Hackers DOX ICE Agents", .downloadable),
-            ("Members Only Strategy Stream", .members),
-            ("Upcoming Premiere Example", .premiere)
+        // Compare the fields separately. A tuple does not satisfy XCTAssertEqual's Equatable constraint.
+        XCTAssertEqual(page.items.map(\.title), [
+            "MAKE THE GOYIM GREAT AGAIN!!!",
+            "Governments Tell Citizens to Prepare for DISASTER",
+            "Leftist Hackers DOX ICE Agents",
+            "Members Only Strategy Stream",
+            "Upcoming Premiere Example"
+        ])
+        XCTAssertEqual(page.items.map(\.disposition), [
+            .downloadable, .downloadable, .downloadable, .members, .premiere
         ])
         XCTAssertEqual(page.items[0].id, "449349028")
         XCTAssertEqual(page.items[0].permalink, "v7hpguy")

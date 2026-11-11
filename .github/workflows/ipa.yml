@@ -13,8 +13,8 @@ jobs:
     name: Parser fixtures
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Fixture tests
@@ -29,8 +29,8 @@ jobs:
     # The IPA job must not list this job under `needs`.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Verify the Videos tab and stream resolver
@@ -41,7 +41,7 @@ jobs:
     # Intentionally has no `needs:`. A failed or skipped live check must not block the IPA.
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Select a simulator
         id: sim
         run: |
@@ -62,7 +62,7 @@ jobs:
       - name: Unsigned IPA
         run: bash scripts/build-unsigned-ipa.sh
       - name: Upload IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: FuentesArchive-unsigned-ipa
           path: |
