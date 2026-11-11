@@ -1,0 +1,122 @@
+{
+  "fps": 30,
+  "w": 1920,
+  "h": 1080,
+  "u": {
+    "tar": {
+      "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.caa.tar?r_file=chunklist.m3u8&r_type=application%2Fvnd.apple.mpegurl&r_range=532494336-532534669",
+      "meta": {
+        "bitrate": 1058,
+        "size": 532541440,
+        "w": 854,
+        "h": 480
+      }
+    },
+    "timeline": {
+      "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.Faa.mp4",
+      "meta": {
+        "bitrate": 11,
+        "size": 6027287,
+        "w": 320,
+        "h": 180
+      }
+    },
+    "audio": {
+      "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.Gaa.aac",
+      "meta": {
+        "bitrate": 192,
+        "size": 96550801,
+        "w": 0,
+        "h": 0
+      }
+    },
+    "hls": {
+      "url": "https://rumble.com/hls-vod/CRrf9h4jVjs/playlist.m3u8"
+    }
+  },
+  "ua": {
+    "tar": {
+      "360": {
+        "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.baa.tar?r_file=chunklist.m3u8&r_type=application%2Fvnd.apple.mpegurl&r_range=341945856-341986097",
+        "meta": {
+          "bitrate": 680,
+          "size": 341995520,
+          "w": 640,
+          "h": 360
+        }
+      },
+      "480": {
+        "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.caa.tar?r_file=chunklist.m3u8&r_type=application%2Fvnd.apple.mpegurl&r_range=532494336-532534669",
+        "meta": {
+          "bitrate": 1058,
+          "size": 532541440,
+          "w": 854,
+          "h": 480
+        }
+      },
+      "720": {
+        "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.gaa.tar?r_file=chunklist.m3u8&r_type=application%2Fvnd.apple.mpegurl&r_range=1076515840-1076556320",
+        "meta": {
+          "bitrate": 2140,
+          "size": 1076561920,
+          "w": 1280,
+          "h": 720
+        }
+      },
+      "1080": {
+        "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.haa.tar?r_file=chunklist.m3u8&r_type=application%2Fvnd.apple.mpegurl&r_range=2070787072-2070827954",
+        "meta": {
+          "bitrate": 4117,
+          "size": 2070835200,
+          "w": 1920,
+          "h": 1080
+        }
+      },
+      "240": {
+        "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.oaa.tar?r_file=chunklist.m3u8&r_type=application%2Fvnd.apple.mpegurl&r_range=111744000-111783849",
+        "meta": {
+          "bitrate": 222,
+          "size": 111790080,
+          "w": 640,
+          "h": 360
+        }
+      }
+    },
+    "timeline": {
+      "180": {
+        "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.Faa.mp4",
+        "meta": {
+          "bitrate": 11,
+          "size": 6027287,
+          "w": 320,
+          "h": 180
+        }
+      }
+    },
+    "audio": {
+      "192": {
+        "url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/2/Y/5/7/c/Y57cB.Gaa.aac",
+        "meta": {
+          "bitrate": 192,
+          "size": 96550801,
+          "w": 0,
+          "h": 0
+        }
+      }
+    },
+    "hls": {
+      "auto": {
+        "url": "https://rumble.com/hls-vod/CRrf9h4jVjs/playlist.m3u8"
+      }
+    }
+  },
+  "title": "Nick Fuentes on the Alex Jones Show",
+  "author": {
+    "name": "Nicholas J. Fuentes",
+    "url": "https://rumble.com/c/nickjfuentes"
+  },
+  "duration": 4023,
+  "live": 0,
+  "live_placeholder": false,
+  "pubDate": "2026-11-10T19:43:12+00:00"
+}

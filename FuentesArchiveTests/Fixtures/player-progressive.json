@@ -1,0 +1,76 @@
+{
+  "fps": 29.97,
+  "w": 1280,
+  "h": 720,
+  "u": {
+    "mp4": {
+      "url": "https://hugh.cdn.rumble.cloud/video/s8/2/5/M/z/1/5Mz1a.caa.2.mp4",
+      "meta": {
+        "bitrate": 810,
+        "size": 23720936,
+        "w": 854,
+        "h": 480
+      }
+    },
+    "webm": {
+      "url": "https://hugh.cdn.rumble.cloud/video/s8/2/5/M/z/1/5Mz1a.daa.1.webm",
+      "meta": {
+        "bitrate": 809,
+        "size": 23682748,
+        "w": 854,
+        "h": 480
+      }
+    }
+  },
+  "ua": {
+    "mp4": {
+      "360": {
+        "url": "https://hugh.cdn.rumble.cloud/video/s8/2/5/M/z/1/5Mz1a.baa.1.mp4",
+        "meta": {
+          "bitrate": 631,
+          "size": 18488017,
+          "w": 640,
+          "h": 360
+        }
+      },
+      "480": {
+        "url": "https://hugh.cdn.rumble.cloud/video/s8/2/5/M/z/1/5Mz1a.caa.2.mp4",
+        "meta": {
+          "bitrate": 810,
+          "size": 23720936,
+          "w": 854,
+          "h": 480
+        }
+      },
+      "720": {
+        "url": "https://hugh.cdn.rumble.cloud/video/s8/2/5/M/z/1/5Mz1a.gaa.1.mp4",
+        "meta": {
+          "bitrate": 1957,
+          "size": 57283801,
+          "w": 1280,
+          "h": 720
+        }
+      }
+    },
+    "webm": {
+      "480": {
+        "url": "https://hugh.cdn.rumble.cloud/video/s8/2/5/M/z/1/5Mz1a.daa.1.webm",
+        "meta": {
+          "bitrate": 809,
+          "size": 23682748,
+          "w": 854,
+          "h": 480
+        }
+      }
+    }
+  },
+  "title": "WMAR 2 News Latest Headlines | October 20, 6pm",
+  "author": {
+    "name": "WMAR",
+    "url": "https://rumble.com/c/WMAR"
+  },
+  "duration": 234,
+  "live": 0,
+  "live_placeholder": false,
+  "pubDate": "2019-10-20T22:52:48+00:00"
+}

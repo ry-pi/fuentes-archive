@@ -1,0 +1,16 @@
+{
+  "type": "video",
+  "version": "1.0",
+  "title": "Nick Fuentes on the Alex Jones Show",
+  "author_name": "Nicholas J. Fuentes",
+  "author_url": "https://rumble.com/c/nickjfuentes",
+  "provider_name": "Rumble.com",
+  "provider_url": "https://rumble.com/",
+  "html": "<iframe src=\"https://rumble.com/embed/v7fz69o/\" width=\"1920\" height=\"1080\" frameborder=\"0\" title=\"Nick Fuentes on the Alex Jones Show\" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>",
+  "width": 1920,
+  "height": 1080,
+  "duration": 4023,
+  "thumbnail_url": "https://hugh.cdn.rumble.cloud/video/fww1/f5/s8/1/Y/5/7/c/Y57cB.qR4e-small-Nick-Fuentes-on-the-Alex-Jo..jpg",
+  "thumbnail_width": 1280,
+  "thumbnail_height": 720
+}

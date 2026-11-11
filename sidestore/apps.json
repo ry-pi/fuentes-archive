@@ -1,0 +1,40 @@
+{
+  "name": "Fuentes Archive",
+  "subtitle": "SideStore source for the unsigned build",
+  "description": "Add this source after you host the IPA. The downloadURL below is a placeholder. SideStore will not be able to refresh the app until that URL serves the real FuentesArchive-unsigned.ipa over HTTPS.",
+  "website": "https://rumble.com/c/nickjfuentes/videos",
+  "tintColor": "EDC24F",
+  "featuredApps": [
+    "com.local.fuentesarchive"
+  ],
+  "apps": [
+    {
+      "name": "Fuentes Archive",
+      "bundleIdentifier": "com.local.fuentesarchive",
+      "developerName": "Fuentes Archive",
+      "subtitle": "New videos from the Rumble Videos tab",
+      "localizedDescription": "Watches https://rumble.com/c/nickjfuentes/videos and saves new public uploads into the Files app. Shorts, livestreams, and the All tab are not downloaded. No App Store account and no paid signing entitlements.",
+      "iconURL": "https://REPLACE_WITH_YOUR_HOST/icon-1024.png",
+      "tintColor": "EDC24F",
+      "category": "entertainment",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "buildVersion": "1",
+          "date": "2026-11-11T00:00:00Z",
+          "localizedDescription": "First sideload build. Videos-tab sync, background downloads, Wi-Fi only, quality picker, local RSS export.",
+          "downloadURL": "https://REPLACE_WITH_YOUR_HOST/FuentesArchive-unsigned.ipa",
+          "size": 2500000,
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": [
+        {
+          "type": "photos",
+          "usageDescription": "Optional. Copies a finished download into Photos when that setting is on. The file is always kept in the Files app."
+        }
+      ]
+    }
+  ],
+  "news": []
+}

@@ -1,0 +1,62 @@
+name: Unsigned IPA
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  fixtures:
+    name: Parser fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fixture tests
+        run: python3 scripts/verify_rumble.py
+
+  live:
+    name: Live Rumble check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify the Videos tab and stream resolver
+        run: python3 scripts/verify_rumble.py --live
+
+  ipa:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select a simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          ID="$(xcrun simctl list devices available | grep -E 'iPhone' | head -n 1 | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')"
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $ID"
+      - name: Unit tests
+        run: |
+          xcodebuild test \
+            -project FuentesArchive.xcodeproj \
+            -scheme FuentesArchive \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.id }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+      - name: Unsigned IPA
+        run: bash scripts/build-unsigned-ipa.sh
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FuentesArchive-unsigned-ipa
+          path: |
+            build/FuentesArchive-unsigned.ipa
+            sidestore/apps.json
+          if-no-files-found: error
