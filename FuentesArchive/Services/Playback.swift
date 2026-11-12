@@ -27,7 +27,7 @@ enum MediaCheck {
         let gate = DispatchSemaphore(value: 0)
         var report = MediaReport(duration: 0, audioTracks: 0, videoTracks: 0, problem: "The file could not be checked.")
         Task {
-            report = await load(url, requireAudio: requireAudio)
+            report = await load(url: url, requireAudio: requireAudio)
             gate.signal()
         }
         if gate.wait(timeout: .now() + 20) == .timedOut {

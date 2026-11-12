@@ -487,7 +487,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                     try self.concatenate(pieces, to: destination)
                     try? FileManager.default.removeItem(at: folder)
                     DebugLog.event("assemble \(videoID) concatenated ts \(Self.seconds(since: started))s")
-                    self.publish(videoID, url: destination, quality: snapshot.quality, requireAudio: false)
+                    self.publish(videoID: videoID, url: destination, quality: snapshot.quality, requireAudio: false)
                 } catch {
                     DebugLog.event("assemble \(videoID) failed to concatenate")
                     self.emit(videoID, .failed("Could not assemble the video file.", nil))
@@ -498,7 +498,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 let info = try TSRemuxer.remux(files: pieces, to: destination, audioOnly: snapshot.audioOnly)
                 try? FileManager.default.removeItem(at: folder)
                 DebugLog.event("remux \(videoID) \(destination.pathExtension) \(info.width)x\(info.height) video=\(info.videoSamples) audio=\(info.audioSamples) \(Self.seconds(since: started))s")
-                self.publish(videoID, url: destination, quality: snapshot.quality, requireAudio: snapshot.audioOnly)
+                self.publish(videoID: videoID, url: destination, quality: snapshot.quality, requireAudio: snapshot.audioOnly)
             } catch {
                 try? FileManager.default.removeItem(at: destination)
                 guard !snapshot.audioOnly else {
@@ -510,7 +510,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                     try self.concatenate(pieces, to: ts)
                     try? FileManager.default.removeItem(at: folder)
                     DebugLog.event("remux \(videoID) fell back to ts \(Self.seconds(since: started))s")
-                    self.publish(videoID, url: ts, quality: snapshot.quality + " · MPEG-TS", requireAudio: false)
+                    self.publish(videoID: videoID, url: ts, quality: snapshot.quality + " · MPEG-TS", requireAudio: false)
                 } catch {
                     DebugLog.event("assemble \(videoID) failed")
                     self.emit(videoID, .failed("Could not assemble the video file.", nil))
@@ -568,7 +568,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             jobs[videoID] = nil
             lock.unlock()
             DebugLog.event("saved \(videoID) \(destination.lastPathComponent) direct file")
-            publish(videoID, url: destination, quality: quality, requireAudio: audio)
+            publish(videoID: videoID, url: destination, quality: quality, requireAudio: audio)
         } catch {
             DebugLog.event("save failed \(videoID) \(error.localizedDescription)")
             emit(videoID, .failed("Could not move the video into Files.", nil))
