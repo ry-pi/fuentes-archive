@@ -88,17 +88,6 @@ extension VideoRecord {
     }
 }
 
-struct ActiveBadge: ViewModifier {
-    var count: Int
-    func body(content: Content) -> some View {
-        if count > 0 {
-            content.badge(count)
-        } else {
-            content
-        }
-    }
-}
-
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @State private var selection: String?
@@ -108,7 +97,7 @@ struct RootView: View {
             NavigationStack { library }
                 .tabItem { Label("Videos", systemImage: "play.rectangle.on.rectangle") }
             NavigationStack { DownloadsView() }
-                .modifier(ActiveBadge(count: model.activeDownloadCount))
+                .badge(model.activeDownloadCount)
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
         }
         .preferredColorScheme(.dark)
@@ -195,25 +184,28 @@ struct LibraryView: View {
         }
         .searchable(text: $model.search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
         .refreshable { model.sync(trigger: "pull") }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    Picker("Sort", selection: $model.sort) {
-                        ForEach(LibrarySort.allCases) { item in
-                            Text(item.label).tag(item)
-                        }
+        .toolbar(content: libraryToolbar)
+    }
+
+    @ToolbarContentBuilder
+    private func libraryToolbar() -> some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Menu {
+                Picker("Sort", selection: $model.sort) {
+                    ForEach(LibrarySort.allCases) { item in
+                        Text(item.label).tag(item)
                     }
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
                 }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { model.sync(trigger: "manual") } label: {
-                    if model.syncing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
-                }
-                .disabled(model.syncing)
-                NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button { model.sync(trigger: "manual") } label: {
+                if model.syncing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
             }
+            .disabled(model.syncing)
+            NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
         }
     }
 
@@ -623,7 +615,12 @@ struct RefreshLogView: View {
             }
         }
         .navigationTitle("Refresh log")
-        .toolbar {
+        .toolbar(content: clearToolbar)
+    }
+
+    @ToolbarContentBuilder
+    private func clearToolbar() -> some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
             Button("Clear") { model.clearLog() }
         }
     }
@@ -643,71 +640,99 @@ struct DownloadOptionsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if let video, video.status == .downloaded, video.fileURL != nil {
-                    Section("Saved on this iPhone") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(video.qualityLabel ?? "Saved file")
-                                .font(.headline)
-                            if let url = video.fileURL {
-                                Text(Format.bytes(Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)))
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.muted)
-                            }
-                        }
-                        Button("Play") { play = true }
-                        Button("Delete saved file", role: .destructive) { model.deleteFile(videoID) }
-                    }
+                if let saved = savedVideo {
+                    savedSection(saved)
                 }
-                Section("Download another copy") {
-                    if loading {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("Reading available qualities…")
-                        }
-                    } else if let error {
-                        Text(error).foregroundStyle(.red)
-                        Button("Try again") { Task { await load() } }
-                    } else if choices.isEmpty {
-                        Text("No downloadable renditions were published for this video.")
-                            .foregroundStyle(Theme.muted)
-                    } else {
-                        ForEach(choices) { choice in
-                            Button {
-                                model.download(videoID, choice: choice)
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(choice.title)
-                                        Text(choice.detail)
-                                            .font(.caption)
-                                            .foregroundStyle(Theme.muted)
-                                    }
-                                    Spacer()
-                                    Text(choice.sizeLabel)
-                                        .font(.subheadline.monospacedDigit())
-                                        .foregroundStyle(Theme.gold)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
+                optionsSection
             }
             .navigationTitle(video?.title ?? "Download")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
+            .toolbar(content: closeToolbar)
         }
         .presentationDetents([.medium, .large])
         .preferredColorScheme(.dark)
         .task { await load() }
         .fullScreenCover(isPresented: $play) {
-            if let video { PlayerScreen(video: video) }
+            if let video {
+                PlayerScreen(video: video)
+            }
         }
+    }
+
+    private var savedVideo: VideoRecord? {
+        guard let video, video.status == .downloaded, video.fileURL != nil else { return nil }
+        return video
+    }
+
+    @ToolbarContentBuilder
+    private func closeToolbar() -> some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Close") { dismiss() }
+        }
+    }
+
+    private func savedSection(_ video: VideoRecord) -> some View {
+        Section("Saved on this iPhone") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(video.qualityLabel ?? "Saved file")
+                    .font(.headline)
+                if let url = video.fileURL {
+                    Text(byteText(url))
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            Button("Play") { play = true }
+            Button("Delete saved file", role: .destructive) { model.deleteFile(videoID) }
+        }
+    }
+
+    private var optionsSection: some View {
+        Section("Download another copy") {
+            if loading {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Reading available qualities…")
+                }
+            } else if let error {
+                Text(error).foregroundStyle(.red)
+                Button("Try again") { Task { await load() } }
+            } else if choices.isEmpty {
+                Text("No downloadable renditions were published for this video.")
+                    .foregroundStyle(Theme.muted)
+            } else {
+                ForEach(choices) { choice in
+                    choiceButton(choice)
+                }
+            }
+        }
+    }
+
+    private func choiceButton(_ choice: DownloadChoice) -> some View {
+        Button {
+            model.download(videoID, choice: choice)
+            dismiss()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(choice.title)
+                    Text(choice.detail)
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                Text(choice.sizeLabel)
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(Theme.gold)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func byteText(_ url: URL) -> String {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        let bytes = values?.fileSize ?? 0
+        return Format.bytes(Int64(bytes))
     }
 
     private func load() async {
@@ -730,21 +755,32 @@ struct DownloadOptionsSheet: View {
 struct DownloadsView: View {
     @EnvironmentObject private var model: AppModel
 
+    private var rows: [VideoRecord] { model.downloadRows() }
+
+    private var canPauseAll: Bool {
+        rows.contains { item in
+            item.status == .downloading || item.status == .queued
+        }
+    }
+
+    private var canResumeAll: Bool {
+        rows.contains { item in
+            item.status == .paused || item.status == .waitingForWiFi
+        }
+    }
+
     var body: some View {
-        let rows = model.downloadRows()
         List {
             if rows.isEmpty {
-                ContentUnavailableView("No downloads yet", systemImage: "arrow.down.circle", description: Text("Open a video and pick a quality. Active, paused, failed, and finished items stay here."))
-                    .listRowBackground(Color.clear)
+                ContentUnavailableView(
+                    "No downloads yet",
+                    systemImage: "arrow.down.circle",
+                    description: Text("Open a video and pick a quality. Active, paused, failed, and finished items stay here.")
+                )
+                .listRowBackground(Color.clear)
             } else {
                 Section {
-                    HStack {
-                        Button("Pause all") { model.pauseAll() }
-                            .disabled(!rows.contains { $0.status == .downloading || $0.status == .queued })
-                        Spacer()
-                        Button("Resume all") { model.resumeAll() }
-                            .disabled(!rows.contains { $0.status == .paused || $0.status == .waitingForWiFi })
-                    }
+                    controls
                 }
                 ForEach(rows) { video in
                     DownloadRow(video: video)
@@ -754,6 +790,16 @@ struct DownloadsView: View {
         .navigationTitle("Downloads")
         .scrollContentBackground(.hidden)
         .background(Theme.background)
+    }
+
+    private var controls: some View {
+        HStack {
+            Button("Pause all") { model.pauseAll() }
+                .disabled(!canPauseAll)
+            Spacer()
+            Button("Resume all") { model.resumeAll() }
+                .disabled(!canResumeAll)
+        }
     }
 }
 
@@ -768,27 +814,35 @@ struct DownloadRow: View {
                 .font(.caption)
                 .foregroundStyle(Theme.muted)
             if video.status == .downloading || video.status == .paused {
-                ProgressView(value: min(max(video.progress, 0), 1))
+                ProgressView(value: clampedProgress)
                     .tint(Theme.gold)
             }
-            HStack {
-                if video.status == .paused || video.status == .failed || video.status == .waitingForWiFi {
-                    Button("Resume") { model.resumeDownload(video.id) }
-                } else if video.status == .downloading || video.status == .queued {
-                    Button("Pause") { model.pauseDownload(video.id) }
-                }
-                if video.status != .downloaded {
-                    Button("Stop", role: .destructive) { model.stopDownload(video.id) }
-                }
-                Spacer()
-                Text(sizeLine)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(Theme.muted)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            actions
         }
         .padding(.vertical, 4)
+    }
+
+    private var clampedProgress: Double {
+        min(max(video.progress, 0), 1)
+    }
+
+    private var actions: some View {
+        HStack {
+            if video.status == .paused || video.status == .failed || video.status == .waitingForWiFi {
+                Button("Resume") { model.resumeDownload(video.id) }
+            } else if video.status == .downloading || video.status == .queued {
+                Button("Pause") { model.pauseDownload(video.id) }
+            }
+            if video.status != .downloaded {
+                Button("Stop", role: .destructive) { model.stopDownload(video.id) }
+            }
+            Spacer()
+            Text(sizeLine)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Theme.muted)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     private var statusLine: String {
