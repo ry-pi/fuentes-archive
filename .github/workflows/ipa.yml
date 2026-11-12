@@ -69,17 +69,39 @@ jobs:
             build/FuentesArchive-unsigned.ipa
             sidestore/apps.json
           if-no-files-found: error
-      - name: Publish rolling GitHub Release
+      - name: Publish versioned release + SideStore source
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # One rolling release so this URL always fetches the newest IPA:
-          # https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa
+          IPA=build/FuentesArchive-unsigned.ipa
+          rm -rf /tmp/ipa && unzip -o -q "$IPA" 'Payload/*.app/Info.plist' -d /tmp/ipa
+          PL=$(ls /tmp/ipa/Payload/*.app/Info.plist)
+          VER=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PL")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PL")
+          TAG="v${VER}-${BUILD}"
+          echo "IPA is $VER ($BUILD) -> $TAG"
+          python3 - "$VER" "$BUILD" <<'PY'
+          import json, sys
+          v = json.load(open("sidestore/apps.json"))["apps"][0]["versions"][0]
+          if (v["version"], v["buildVersion"]) != (sys.argv[1], sys.argv[2]):
+              sys.exit(f"sidestore/apps.json top entry {v['version']} ({v['buildVersion']}) does not match IPA {sys.argv[1]} ({sys.argv[2]}); bump both")
+          PY
+          # Versioned release (replaced if the same version is rebuilt)
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" --target "${GITHUB_SHA}" --title "Fuentes Archive $VER ($BUILD)" \
+            --notes "Unsigned build from ${GITHUB_SHA}. Install via the SideStore source: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/source/apps.json" \
+            --latest "$IPA"
+          # Rolling alias kept for direct links
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest \
-            --target "${GITHUB_SHA}" \
-            --title "Latest unsigned IPA" \
-            --notes "Unsigned Fuentes Archive build from ${GITHUB_SHA}. Install with SideStore. The asset name is stable: FuentesArchive-unsigned.ipa." \
-            --latest \
-            build/FuentesArchive-unsigned.ipa
+          gh release create latest --target "${GITHUB_SHA}" --title "Latest unsigned IPA" \
+            --notes "Alias of $TAG." --latest=false "$IPA"
+          # SideStore source lives on the 'source' branch (stable raw URL)
+          mkdir -p /tmp/src
+          python3 scripts/publish_source.py /tmp/src/apps.json --ipa "$IPA" --version "$VER" --build "$BUILD"
+          cp sidestore/icon-1024.png /tmp/src/
+          cd /tmp/src
+          git init -q -b source
+          git config user.name github-actions; git config user.email github-actions@users.noreply.github.com
+          git add . && git commit -qm "SideStore source for $TAG"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" source
