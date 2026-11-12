@@ -653,8 +653,8 @@ struct DownloadOptionsSheet: View {
         .preferredColorScheme(.dark)
         .task { await load() }
         .fullScreenCover(isPresented: $play) {
-            if let video {
-                PlayerScreen(video: video)
+            if let url = video?.fileURL {
+                PlayerScreen(url: url)
             }
         }
     }
