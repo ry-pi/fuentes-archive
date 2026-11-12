@@ -19,6 +19,15 @@
       "category": "entertainment",
       "versions": [
         {
+          "version": "1.1.0",
+          "buildVersion": "2",
+          "date": "2026-11-12T02:00:00Z",
+          "localizedDescription": "Tap a video for download options (every quality or audio-only, with file sizes). New Downloads tab with pause, resume, stop, and Pause All.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa",
+          "size": 2500000,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.0.0",
           "buildVersion": "1",
           "date": "2026-11-11T00:00:00Z",
