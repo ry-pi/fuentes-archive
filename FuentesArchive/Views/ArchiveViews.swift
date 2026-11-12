@@ -1,4 +1,3 @@
-import AVKit
 import SwiftUI
 import UIKit
 
@@ -99,6 +98,8 @@ struct RootView: View {
             NavigationStack { DownloadsView() }
                 .badge(model.activeDownloadCount)
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
+            NavigationStack { PlayerTab() }
+                .tabItem { Label("Player", systemImage: "headphones") }
         }
         .preferredColorScheme(.dark)
         .tint(Theme.gold)
@@ -399,10 +400,8 @@ struct VideoDetailView: View {
         .background(Theme.background)
         .navigationTitle("Video")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $playing) {
-            if let url = current.fileURL {
-                PlayerScreen(url: url)
-            }
+        .fullScreenCover(isPresented: $playing) {
+            ArchivePlayer(video: current)
         }
     }
 
@@ -454,33 +453,6 @@ struct VideoDetailView: View {
     private func label(_ title: String, _ symbol: String) -> some View {
         Label(title, systemImage: symbol)
             .frame(maxWidth: .infinity)
-    }
-}
-
-struct PlayerScreen: View {
-    let url: URL
-    @State private var player: AVPlayer
-    @Environment(\.dismiss) private var dismiss
-
-    init(url: URL) {
-        self.url = url
-        _player = State(initialValue: AVPlayer(url: url))
-    }
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            VideoPlayer(player: player)
-                .ignoresSafeArea()
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .padding(10)
-                    .background(.black.opacity(0.55))
-                    .clipShape(Circle())
-            }
-            .padding()
-        }
-        .onAppear { player.play() }
-        .onDisappear { player.pause() }
     }
 }
 
@@ -715,8 +687,8 @@ struct DownloadOptionsSheet: View {
         .preferredColorScheme(.dark)
         .task { await load() }
         .fullScreenCover(isPresented: $play) {
-            if let url = video?.fileURL {
-                PlayerScreen(url: url)
+            if let video {
+                ArchivePlayer(video: video)
             }
         }
     }

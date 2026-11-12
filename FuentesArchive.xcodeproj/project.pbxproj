@@ -17,8 +17,10 @@
 		5CE3FF9A88E9F790B9BCC788 /* BackgroundScheduler.swift */ = {isa = PBXBuildFile; fileRef = C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */; };
 		853720E99C9616D568B021C9 /* DebugLog.swift */ = {isa = PBXBuildFile; fileRef = E1EC5EF573D8AAC259DB7468 /* DebugLog.swift */; };
 		6B4FC8A9A8F88C0F7A7D6672 /* DownloadManager.swift */ = {isa = PBXBuildFile; fileRef = A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */; };
+		AD9C442A59893038C63C5DCF /* Playback.swift */ = {isa = PBXBuildFile; fileRef = 3E4905BCF246BACA73472B67 /* Playback.swift */; };
 		2778D76B4A337D3238868817 /* RumbleClient.swift */ = {isa = PBXBuildFile; fileRef = 2AB10FA7CFFB276B1A31A971 /* RumbleClient.swift */; };
 		3A4DC8E6C964F0AC3BA660E4 /* ArchiveViews.swift */ = {isa = PBXBuildFile; fileRef = 33097EE659A74408DAA8B695 /* ArchiveViews.swift */; };
+		94AD37D1E55FD504B3B64C8F /* PlayerTab.swift */ = {isa = PBXBuildFile; fileRef = 55B4AF6BB190263F3F68833B /* PlayerTab.swift */; };
 		1631FB91CEDDFEB4A716969E /* Assets.xcassets */ = {isa = PBXBuildFile; fileRef = 7547A062172055DAAD91F026 /* Assets.xcassets */; };
 		8C802B76451FB11B8637FBE9 /* PrivacyInfo.xcprivacy */ = {isa = PBXBuildFile; fileRef = A5FE2EA211F4A22B0E3EBD92 /* PrivacyInfo.xcprivacy */; };
 		E69D62F461C1515CEBECEC26 /* ArchiveTests.swift */ = {isa = PBXBuildFile; fileRef = 21B6685F82015710C2776FDC /* ArchiveTests.swift */; };
@@ -57,8 +59,10 @@
 		C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/BackgroundScheduler.swift"; sourceTree = "<group>"; };
 		E1EC5EF573D8AAC259DB7468 /* DebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/DebugLog.swift"; sourceTree = "<group>"; };
 		A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/DownloadManager.swift"; sourceTree = "<group>"; };
+		3E4905BCF246BACA73472B67 /* Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/Playback.swift"; sourceTree = "<group>"; };
 		2AB10FA7CFFB276B1A31A971 /* RumbleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/RumbleClient.swift"; sourceTree = "<group>"; };
 		33097EE659A74408DAA8B695 /* ArchiveViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/ArchiveViews.swift"; sourceTree = "<group>"; };
+		55B4AF6BB190263F3F68833B /* PlayerTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/PlayerTab.swift"; sourceTree = "<group>"; };
 		7547A062172055DAAD91F026 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A5FE2EA211F4A22B0E3EBD92 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		21B6685F82015710C2776FDC /* ArchiveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveTests.swift; sourceTree = "<group>"; };
@@ -114,8 +118,10 @@
 				C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */,
 				E1EC5EF573D8AAC259DB7468 /* DebugLog.swift */,
 				A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */,
+				3E4905BCF246BACA73472B67 /* Playback.swift */,
 				2AB10FA7CFFB276B1A31A971 /* RumbleClient.swift */,
 				33097EE659A74408DAA8B695 /* ArchiveViews.swift */,
+				55B4AF6BB190263F3F68833B /* PlayerTab.swift */,
 				7547A062172055DAAD91F026 /* Assets.xcassets */,
 				A5FE2EA211F4A22B0E3EBD92 /* PrivacyInfo.xcprivacy */,
 			);
@@ -268,8 +274,10 @@
 				5CE3FF9A88E9F790B9BCC788 /* BackgroundScheduler.swift */,
 				853720E99C9616D568B021C9 /* DebugLog.swift */,
 				6B4FC8A9A8F88C0F7A7D6672 /* DownloadManager.swift */,
+				AD9C442A59893038C63C5DCF /* Playback.swift */,
 				2778D76B4A337D3238868817 /* RumbleClient.swift */,
 				3A4DC8E6C964F0AC3BA660E4 /* ArchiveViews.swift */,
+				94AD37D1E55FD504B3B64C8F /* PlayerTab.swift */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -344,7 +352,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -354,7 +362,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "( $(inherited), @executable_path/Frameworks )";
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.fuentesarchive;
@@ -381,7 +389,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -389,7 +397,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "( $(inherited), @executable_path/Frameworks )";
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.fuentesarchive;
 				PRODUCT_NAME = FuentesArchive;
 				SDKROOT = iphoneos;

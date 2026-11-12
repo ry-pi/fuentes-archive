@@ -84,15 +84,22 @@ struct VideoRecord: Codable, Identifiable, Equatable {
     var updatedAt: Date
     var request: DownloadRequest? = nil
     var bytesPerSecond: Double = 0
+    var playbackSeconds: Double = 0
+
+    var isAudio: Bool {
+        if request?.audioOnly == true { return true }
+        let ext = (relativePath as NSString?)?.pathExtension.lowercased() ?? ""
+        return ext == "m4a" || ext == "aac"
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, permalink, title, watchURL, thumbnailURL, published, duration, views, channelName
         case disposition, status, progress, bytesWritten, bytesExpected, relativePath, qualityLabel
         case errorMessage, attemptCount, nextRetryAt, segmentTotal, segmentDone, updatedAt
-        case request, bytesPerSecond
+        case request, bytesPerSecond, playbackSeconds
     }
 
-    init(id: String, permalink: String, title: String, watchURL: String, thumbnailURL: String?, published: Date?, duration: Double?, views: Int?, channelName: String?, disposition: Disposition, status: DownloadStatus, progress: Double, bytesWritten: Int64, bytesExpected: Int64, relativePath: String?, qualityLabel: String?, errorMessage: String?, attemptCount: Int, nextRetryAt: Date?, segmentTotal: Int, segmentDone: Int, updatedAt: Date, request: DownloadRequest? = nil, bytesPerSecond: Double = 0) {
+    init(id: String, permalink: String, title: String, watchURL: String, thumbnailURL: String?, published: Date?, duration: Double?, views: Int?, channelName: String?, disposition: Disposition, status: DownloadStatus, progress: Double, bytesWritten: Int64, bytesExpected: Int64, relativePath: String?, qualityLabel: String?, errorMessage: String?, attemptCount: Int, nextRetryAt: Date?, segmentTotal: Int, segmentDone: Int, updatedAt: Date, request: DownloadRequest? = nil, bytesPerSecond: Double = 0, playbackSeconds: Double = 0) {
         self.id = id
         self.permalink = permalink
         self.title = title
@@ -117,6 +124,7 @@ struct VideoRecord: Codable, Identifiable, Equatable {
         self.updatedAt = updatedAt
         self.request = request
         self.bytesPerSecond = bytesPerSecond
+        self.playbackSeconds = playbackSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -145,6 +153,7 @@ struct VideoRecord: Codable, Identifiable, Equatable {
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         request = try container.decodeIfPresent(DownloadRequest.self, forKey: .request)
         bytesPerSecond = try container.decodeIfPresent(Double.self, forKey: .bytesPerSecond) ?? 0
+        playbackSeconds = try container.decodeIfPresent(Double.self, forKey: .playbackSeconds) ?? 0
     }
 
     func encode(to encoder: Encoder) throws {
@@ -173,6 +182,7 @@ struct VideoRecord: Codable, Identifiable, Equatable {
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(request, forKey: .request)
         try container.encode(bytesPerSecond, forKey: .bytesPerSecond)
+        try container.encode(playbackSeconds, forKey: .playbackSeconds)
     }
 }
 

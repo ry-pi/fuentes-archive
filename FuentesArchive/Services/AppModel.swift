@@ -161,6 +161,25 @@ final class AppModel: ObservableObject {
         snapshot.videos.values.filter { $0.status == .downloading || $0.status == .queued }.count
     }
 
+    func playable() -> [VideoRecord] {
+        snapshot.videos.values.filter { record in
+            guard record.status == .downloaded, let url = record.fileURL else { return false }
+            guard FileManager.default.fileExists(atPath: url.path) else { return false }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return size > 0
+        }.sorted { left, right in
+            (left.published ?? left.updatedAt) > (right.published ?? right.updatedAt)
+        }
+    }
+
+    func rememberPlayback(_ id: String, seconds: Double) {
+        LibraryStore.shared.update { state in
+            guard var record = state.videos[id] else { return }
+            record.playbackSeconds = seconds
+            state.videos[id] = record
+        }
+    }
+
     func downloadRows() -> [VideoRecord] {
         let order: [DownloadStatus] = [.downloading, .queued, .paused, .waitingForWiFi, .failed, .downloaded]
         return snapshot.videos.values.filter { order.contains($0.status) }.sorted { left, right in

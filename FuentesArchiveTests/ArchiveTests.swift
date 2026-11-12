@@ -94,6 +94,41 @@ final class ArchiveTests: XCTestCase {
         try? FileManager.default.removeItem(at: destination)
     }
 
+    func testAudioOnlyRemuxIsAACInAnM4A() throws {
+        let source = try XCTUnwrap(Bundle(for: ArchiveTests.self).url(forResource: "segment", withExtension: "ts"))
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("audio-only-test.m4a")
+        let info = try TSRemuxer.remux(files: [source], to: destination, audioOnly: true)
+        XCTAssertEqual(info.videoSamples, 0)
+        XCTAssertGreaterThan(info.audioSamples, 50)
+        let blob = try Data(contentsOf: destination)
+        XCTAssertTrue(blob.range(of: Data("M4A ".utf8)) != nil)
+        let four = Data("mp4a".utf8)
+        let start = try XCTUnwrap(blob.range(of: four)?.upperBound)
+        let bytes = [UInt8](blob[start..<blob.endIndex])
+        XCTAssertGreaterThan(bytes.count, 28)
+        XCTAssertEqual(Int(bytes[16]) << 8 | Int(bytes[17]), 1)
+        let rate = (UInt32(bytes[24]) << 24) | (UInt32(bytes[25]) << 16) | (UInt32(bytes[26]) << 8) | UInt32(bytes[27])
+        XCTAssertEqual(rate, 44100 << 16)
+        try? FileManager.default.removeItem(at: destination)
+    }
+
+    func testSavedAudioFlagAndPlaybackPosition() throws {
+        let json = """
+        {"id":"1","permalink":"v1","title":"T","watchURL":"https://rumble.com/v1","disposition":"downloadable","status":"downloaded","progress":1,"bytesWritten":10,"bytesExpected":10,"relativePath":"Videos/talk.m4a","attemptCount":0,"segmentTotal":0,"segmentDone":0,"updatedAt":"2026-11-11T00:00:00Z"}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(VideoRecord.self, from: Data(json.utf8))
+        XCTAssertTrue(record.isAudio)
+        XCTAssertEqual(record.playbackSeconds, 0)
+        let video = """
+        {"id":"2","permalink":"v2","title":"T","watchURL":"https://rumble.com/v2","disposition":"downloadable","status":"downloaded","progress":1,"bytesWritten":10,"bytesExpected":10,"relativePath":"Videos/talk.mp4","attemptCount":0,"segmentTotal":0,"segmentDone":0,"updatedAt":"2026-11-11T00:00:00Z","playbackSeconds":12.5}
+        """
+        let movie = try decoder.decode(VideoRecord.self, from: Data(video.utf8))
+        XCTAssertFalse(movie.isAudio)
+        XCTAssertEqual(movie.playbackSeconds, 12.5)
+    }
+
     func testPlaylistRelativeURLKeepsTheTarQuery() {
         let base = URL(string: "https://hugh.cdn.rumble.cloud/video/a/A6eaB.oaa.tar?r_file=chunklist.m3u8&r_range=1-2")!
         let resolved = HLSPlaylist.resolve("A6eaB.oaa.tar?r_file=media-0.ts&r_type=video%2Fmp2t&r_range=512-296423", base: base)

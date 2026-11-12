@@ -18,7 +18,10 @@ enum TSRemuxer {
         _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
         let handle = try FileHandle(forWritingTo: destination)
         defer { try? handle.close() }
-        try handle.write(contentsOf: box("ftyp", Data("isom".utf8) + u32(0x200) + Data("isomiso2avc1mp41".utf8)))
+        let brands = audioOnly
+            ? Data("M4A ".utf8) + u32(0) + Data("M4A mp42isom".utf8)
+            : Data("isom".utf8) + u32(0x200) + Data("isomiso2avc1mp41".utf8)
+        try handle.write(contentsOf: box("ftyp", brands))
         let mdatAt = try handle.offset()
         try handle.write(contentsOf: u32(1) + Data("mdat".utf8) + u64(0))
 
