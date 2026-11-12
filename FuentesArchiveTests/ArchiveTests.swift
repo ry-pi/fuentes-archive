@@ -123,17 +123,24 @@ final class ArchiveTests: XCTestCase {
         let variants = StreamResolver.variants(from: player)
         XCTAssertTrue(variants.contains { $0.timeline && $0.url.hasSuffix(".mp4") })
         let best = try XCTUnwrap(StreamResolver.select(variants, capHeight: nil))
-        XCTAssertEqual(best.kind, "tar")
-        XCTAssertEqual(best.height, 1080)
-        XCTAssertTrue(best.url.contains("Y57cB.haa.tar"))
+        XCTAssertEqual(best.kind, "hls")
+        XCTAssertTrue(best.url.contains("playlist.m3u8"))
+        XCTAssertFalse(best.timeline)
         XCTAssertFalse(best.url.contains("Faa.mp4"))
-        let mid = try XCTUnwrap(StreamResolver.select(variants, capHeight: 720))
-        XCTAssertEqual(mid.height, 720)
-        XCTAssertTrue(mid.url.contains("Y57cB.gaa.tar"))
-        let small = try XCTUnwrap(StreamResolver.select(variants, capHeight: 180))
-        XCTAssertGreaterThanOrEqual(small.height, 360)
-        XCTAssertFalse(small.timeline)
-        XCTAssertTrue(small.url.contains("Y57cB.oaa.tar"))
+        XCTAssertFalse(best.url.contains(".tar"))
+        let capped = try XCTUnwrap(StreamResolver.select(variants, capHeight: 180))
+        XCTAssertEqual(capped.kind, "hls")
+        XCTAssertFalse(capped.timeline)
+    }
+
+    func testProgressiveFileBeatsTarPlaylist() {
+        let mp4 = Variant(kind: "mp4", height: 720, bitrate: 2000, size: 50_000_000, url: "https://cdn.example/a.gaa.mp4", timeline: false, audioOnly: false)
+        let tar = Variant(kind: "tar", height: 1080, bitrate: 4000, size: 90_000_000, url: "https://cdn.example/a.haa.tar?r_file=chunklist.m3u8", timeline: false, audioOnly: false)
+        let chosen = StreamResolver.select([tar, mp4], capHeight: nil)
+        XCTAssertEqual(chosen?.kind, "mp4")
+        XCTAssertEqual(chosen?.height, 720)
+        XCTAssertTrue(DownloadOffers.isDirectFile(mp4.url))
+        XCTAssertFalse(DownloadOffers.isDirectFile(tar.url))
     }
 
     func testOEmbedAndPlaylists() throws {
@@ -170,12 +177,17 @@ final class ArchiveTests: XCTestCase {
         let player = try json("player-alex.json")
         let choices = DownloadOffers.build(variants: StreamResolver.variants(from: player), duration: 4023)
         let video = choices.filter { !$0.audioOnly }
-        let heights = video.map(\.height)
-        XCTAssertEqual(Array(Set(heights)).sorted(), [360, 480, 720, 1080])
-        XCTAssertEqual(video.map(\.estimated), Array(repeating: false, count: video.count))
-        let containers = Dictionary(grouping: video, by: \.height).mapValues { $0.map(\.container).sorted() }
-        XCTAssertEqual(containers[1080], ["mp4", "ts"])
-        XCTAssertEqual(video.first { $0.height == 1080 && $0.container == "mp4" }?.bytes, 2_070_835_200)
+        XCTAssertEqual(video.map(\.height), [360, 480, 720, 1080])
+        XCTAssertEqual(video.map(\.estimated), [false, false, false, false])
+        XCTAssertEqual(video.map(\.detail), ["HLS", "HLS", "HLS", "HLS"])
+        XCTAssertEqual(video.map(\.bytes), [341_995_520, 532_541_440, 1_076_561_920, 2_070_835_200])
+        XCTAssertTrue(video.allSatisfy { $0.bytes > 1_000_000 })
+        let progressive = DownloadOffers.build(variants: StreamResolver.variants(from: try json("player-progressive.json")), duration: 234)
+        let files = progressive.filter { !$0.audioOnly }
+        XCTAssertEqual(files.map(\.height), [360, 480, 720])
+        XCTAssertEqual(files.map(\.kind), ["mp4", "mp4", "mp4"])
+        XCTAssertEqual(files.map(\.bytes), [18_488_017, 23_720_936, 57_283_801])
+        XCTAssertFalse(files.contains { $0.detail == "MPEG-TS" })
         let audio = choices.filter(\.audioOnly)
         XCTAssertEqual(audio.count, 1)
         XCTAssertEqual(audio.map(\.bytes), [96_550_801])

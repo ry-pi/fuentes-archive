@@ -511,6 +511,7 @@ struct SettingsView: View {
                 LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
                 NavigationLink("Storage") { StorageView() }
                 NavigationLink("Background refresh log") { RefreshLogView() }
+                NavigationLink("Debug log") { DebugLogView() }
                 Button("Write a local RSS file") { feedURL = model.exportFeed() }
                 Button("Download newest 5 now") { model.downloadNewest(5) }
                 Button("Restore hidden videos") { model.restoreHidden() }
@@ -524,7 +525,7 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.muted)
             }
             Section("About") {
-                Text("Fuentes Archive 1.0.0")
+                Text("Fuentes Archive \(AppVersion.current)")
                 Text("Files land in On My iPhone → Fuentes Archive. iOS decides when background refresh actually runs.")
                     .font(.footnote)
                     .foregroundStyle(Theme.muted)
@@ -585,6 +586,67 @@ struct StorageView: View {
             Button("Delete files", role: .destructive) { model.deleteAllFiles() }
         } message: {
             Text("The video list stays. You can download them again.")
+        }
+    }
+}
+
+enum AppVersion {
+    static var current: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "3"
+        return "\(short) (\(build))"
+    }
+}
+
+struct DebugLogView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var text = ""
+
+    var body: some View {
+        ScrollView {
+            Text(visibleText)
+                .font(.system(.caption, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .padding(16)
+        }
+        .background(Theme.background)
+        .navigationTitle("Debug log")
+        .toolbar(content: debugToolbar)
+        .safeAreaInset(edge: .bottom) {
+            Toggle("Verbose HTTP and progress", isOn: verboseBinding)
+                .padding()
+                .background(Theme.card)
+        }
+        .refreshable { text = DebugLog.text() }
+        .onAppear { text = DebugLog.text() }
+    }
+
+    private var visibleText: String {
+        if text.isEmpty { return "No debug entries yet. Sync or start a download, then pull to refresh." }
+        if text.count <= 80_000 { return text }
+        return "Showing the latest entries. Share exports the full file.\n" + String(text.suffix(80_000))
+    }
+
+    private var verboseBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.verboseLog },
+            set: { value in
+                model.updateSettings { $0.verboseLog = value }
+                DebugLog.event("verbose log \(value ? "on" : "off")")
+            }
+        )
+    }
+
+    @ToolbarContentBuilder
+    private func debugToolbar() -> some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button("Copy") { UIPasteboard.general.string = DebugLog.text() }
+            ShareLink(item: DebugLog.fileURL) { Image(systemName: "square.and.arrow.up") }
+            Button("Clear", role: .destructive) {
+                DebugLog.clear()
+                text = ""
+            }
         }
     }
 }

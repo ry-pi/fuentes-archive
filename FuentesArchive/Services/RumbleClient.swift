@@ -93,17 +93,10 @@ struct RumbleClient {
     }
 
     func contentLength(_ url: URL) async -> Int64? {
-        var request = URLRequest(url: url, timeoutInterval: 20)
-        request.httpMethod = "HEAD"
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue("https://rumble.com/", forHTTPHeaderField: "Referer")
-        guard let (_, response) = try? await session.data(for: request),
-              let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode) else { return nil }
-        if let header = http.value(forHTTPHeaderField: "Content-Length"), let value = Int64(header), value > 0 {
-            return value
-        }
-        return http.expectedContentLength > 0 ? http.expectedContentLength : nil
+        guard DownloadOffers.isDirectFile(url.absoluteString) else { return nil }
+        guard let result = try? await perform(url, method: "HEAD", accept: "*/*", timeout: 20),
+              (200..<300).contains(result.status) else { return nil }
+        return result.length > 0 ? result.length : nil
     }
 
     private func jsonObject(_ url: URL) async throws -> [String: Any] {
@@ -114,16 +107,46 @@ struct RumbleClient {
         return object
     }
 
+    private struct HTTPResult {
+        var data: Data
+        var status: Int
+        var mime: String
+        var length: Int64
+        var finalURL: String
+    }
+
     private func fetch(_ url: URL, accept: String) async throws -> Data {
-        var request = URLRequest(url: url, timeoutInterval: 45)
+        let result = try await perform(url, method: "GET", accept: accept, timeout: 45)
+        if result.status == 410 { throw RumbleError.http(410) }
+        if !(200..<300).contains(result.status) { throw RumbleError.http(result.status) }
+        return result.data
+    }
+
+    private func perform(_ url: URL, method: String, accept: String, timeout: TimeInterval) async throws -> HTTPResult {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = method
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
         request.setValue("https://rumble.com/", forHTTPHeaderField: "Referer")
-        let (data, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 410 { throw RumbleError.http(410) }
-        if !(200..<300).contains(status) { throw RumbleError.http(status) }
-        return data
+        let started = Date()
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+            DebugLog.detail("HTTP \(method) \(url.absoluteString) error \(error.localizedDescription) \(elapsed)ms")
+            throw error
+        }
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        let mime = http?.value(forHTTPHeaderField: "Content-Type") ?? ""
+        let headerLength = Int64(http?.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
+        let length = headerLength > 0 ? headerLength : max(http?.expectedContentLength ?? -1, 0)
+        let finalURL = http?.url?.absoluteString ?? response.url?.absoluteString ?? url.absoluteString
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        DebugLog.detail("HTTP \(method) \(url.absoluteString) -> \(status) \(mime) length=\(length) final=\(finalURL) \(elapsed)ms")
+        return HTTPResult(data: data, status: status, mime: mime, length: length, finalURL: finalURL)
     }
 }

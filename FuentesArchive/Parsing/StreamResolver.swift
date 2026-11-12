@@ -69,17 +69,25 @@ enum StreamResolver {
         return found
     }
 
-    /// Timeline MP4s are scrub previews. A separate AAC track is not the movie.
-    /// Progressive MP4/WebM wins over HLS packaged in a tar, because it is one file.
+    /// Timeline MP4s are scrub previews. yt-dlp skips `ua.tar` (those URLs are HLS playlists)
+    /// and downloads a direct `ua.mp4` / `ua.webm` when one exists. HLS is only the fallback.
     static func select(_ variants: [Variant], capHeight: Int?) -> Variant? {
-        let usable = variants.filter { !$0.timeline && !$0.audioOnly && $0.height > 0 && !$0.url.isEmpty }
-        let progressive = usable.filter { $0.kind == "mp4" || $0.kind == "webm" }
-        let pool = progressive.isEmpty ? usable : progressive
-        if pool.isEmpty {
-            return variants.first { $0.kind == "hls" && !$0.url.isEmpty && !$0.timeline }
+        let video = variants.filter { !$0.timeline && !$0.audioOnly && $0.height > 0 && !$0.url.isEmpty }
+        let progressive = video.filter { $0.kind == "mp4" || $0.kind == "webm" }
+        if !progressive.isEmpty {
+            return pick(progressive, capHeight: capHeight)
         }
+        if let hls = variants.first(where: { $0.kind == "hls" && !$0.url.isEmpty && !$0.timeline }) {
+            return hls
+        }
+        let tar = video.filter { $0.kind == "tar" }
+        if !tar.isEmpty { return pick(tar, capHeight: capHeight) }
+        return nil
+    }
+
+    private static func pick(_ pool: [Variant], capHeight: Int?) -> Variant? {
         func rank(_ item: Variant) -> (Int, Int, Int) {
-            let container = ["mp4": 3, "webm": 2, "hls": 1, "tar": 1][item.kind] ?? 0
+            let container = ["mp4": 3, "webm": 2, "hls": 1, "tar": 0][item.kind] ?? 0
             return (item.height, item.bitrate, container)
         }
         if let capHeight {
@@ -302,11 +310,30 @@ enum DownloadOffers {
         return total
     }
 
+    /// A single media file, not an m3u8 or a tar chunklist. HEAD is only valid for these.
+    static func isDirectFile(_ url: String) -> Bool {
+        let lower = url.lowercased()
+        if lower.contains(".m3u8") || lower.contains("r_file=") || lower.contains(".tar") { return false }
+        return lower.contains(".mp4") || lower.contains(".webm") || lower.contains(".aac") || lower.contains(".m4a")
+    }
+
+    static func sourceRank(_ kind: String) -> Int {
+        switch kind {
+        case "mp4": return 4
+        case "webm": return 3
+        case "hls": return 2
+        case "tar": return 1
+        default: return 0
+        }
+    }
+
     static func build(variants: [Variant], duration: Double?) -> [DownloadChoice] {
         var bestByHeight: [Int: Variant] = [:]
         for item in StreamResolver.videoCandidates(variants) {
-            if let existing = bestByHeight[item.height], existing.bitrate >= item.bitrate {
-                continue
+            if let existing = bestByHeight[item.height] {
+                let betterSource = sourceRank(item.kind) > sourceRank(existing.kind)
+                let sameSourceHigherBitrate = sourceRank(item.kind) == sourceRank(existing.kind) && item.bitrate > existing.bitrate
+                if !betterSource && !sameSourceHigherBitrate { continue }
             }
             bestByHeight[item.height] = item
         }
@@ -314,11 +341,14 @@ enum DownloadOffers {
         for height in bestByHeight.keys.sorted() {
             guard let item = bestByHeight[height] else { continue }
             let estimate = estimate(exact: item.size, bitrateKbps: item.bitrate, duration: duration)
-            let segmented = item.kind == "tar" || item.kind == "hls"
-            choices.append(choice(item, height: height, container: "mp4", title: "\(height)p", detail: segmented ? "MP4" : item.kind.uppercased(), estimate: estimate))
-            if segmented {
-                choices.append(choice(item, height: height, container: "ts", title: "\(height)p", detail: "MPEG-TS", estimate: estimate))
-            }
+            let direct = item.kind == "mp4" || item.kind == "webm"
+            let container = direct ? item.kind : "mp4"
+            let detail = direct ? item.kind.uppercased() : "HLS"
+            choices.append(choice(item, height: height, container: container, title: "\(height)p", detail: detail, estimate: estimate))
+        }
+        if choices.isEmpty, let hls = variants.first(where: { $0.kind == "hls" && !$0.url.isEmpty && !$0.timeline }) {
+            let estimate = estimate(exact: hls.size, bitrateKbps: hls.bitrate, duration: duration)
+            choices.append(choice(hls, height: 0, container: "mp4", title: "Best available", detail: "HLS", estimate: estimate))
         }
         let audios = variants.filter { $0.audioOnly && !$0.timeline && !$0.url.isEmpty }
         if let audio = audios.max(by: { $0.bitrate < $1.bitrate }) {

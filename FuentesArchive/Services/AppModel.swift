@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     private let monitor = NWPathMonitor()
     private var activeSync: Task<Void, Never>?
     private var lastProgressWrite: [String: Date] = [:]
+    private var lastDebugSample: [String: Date] = [:]
     private var pathReady = false
     private var retryWork: DispatchWorkItem?
 
@@ -218,17 +219,18 @@ final class AppModel: ObservableObject {
         guard let watch = URL(string: video.watchURL) else { throw RumbleError.noStream }
         let variants = try await client.variants(for: watch)
         var choices = DownloadOffers.build(variants: variants, duration: video.duration)
-        for index in choices.indices where choices[index].estimated {
+        for index in choices.indices where choices[index].estimated && DownloadOffers.isDirectFile(choices[index].url) {
             let choice = choices[index]
             guard let url = URL(string: choice.url) else { continue }
-            if choice.kind == "tar" || choice.kind == "hls" || choice.url.contains(".m3u8") {
-                if let playlist = try? await client.text(url) {
-                    choices[index] = DownloadOffers.applyingPlaylistBytes(choice, playlistBytes: DownloadOffers.summedRangeBytes(playlist))
-                }
-            } else if let length = await client.contentLength(url) {
+            if let length = await client.contentLength(url) {
                 choices[index] = DownloadOffers.applyingPlaylistBytes(choice, playlistBytes: length)
             }
         }
+        let summary = choices.map { item in
+            let mark = item.estimated ? "~" : ""
+            return "\(item.title) \(item.detail) \(item.kind) \(mark)\(item.bytes)"
+        }.joined(separator: "; ")
+        DebugLog.event("formats \(video.id) \(summary)")
         return choices
     }
 
@@ -353,6 +355,7 @@ final class AppModel: ObservableObject {
         defer { syncing = false }
         log(source: trigger, message: "Looking for new videos on the Videos tab.", level: "info")
         let baseline = !snapshot.baselineReady
+        DebugLog.event("sync \(trigger) start baseline=\(baseline)")
         var pageURL = Channel.videosPage
         var maxPublished: Date?
         let pageLimit = min(10, max(1, snapshot.settings.maxPages))
@@ -408,9 +411,11 @@ final class AppModel: ObservableObject {
             }
             retryDue()
             log(source: trigger, message: "Sync finished.", level: "info")
+            DebugLog.event("sync \(trigger) finished pages=\(pages.count) queued=\(decision.queue.count)")
         } catch {
             LibraryStore.shared.update { $0.lastError = error.localizedDescription }
             log(source: trigger, message: error.localizedDescription, level: "error")
+            DebugLog.event("sync \(trigger) error \(error.localizedDescription)")
         }
         BackgroundScheduler.scheduleAll()
     }
@@ -519,6 +524,7 @@ final class AppModel: ObservableObject {
                     container = "mp4"
                 }
                 guard self.snapshot.videos[id]?.status != .paused else { return }
+                DebugLog.event("chosen \(id) \(variant.kind) \(variant.height)p bytes=\(variant.size) direct=\(DownloadOffers.isDirectFile(variant.url))")
                 DownloadManager.shared.begin(
                     videoID: id,
                     title: record.title,
@@ -575,6 +581,11 @@ final class AppModel: ObservableObject {
                 record.updatedAt = Date()
                 state.videos[id] = record
             }
+            if written > 0, lastDebugSample[id].map({ now.timeIntervalSince($0) >= 3 }) ?? true {
+                lastDebugSample[id] = now
+                let megabytes = (snapshot.videos[id]?.bytesPerSecond ?? 0) / (1024 * 1024)
+                DebugLog.detail(String(format: "progress %@ %.2f MB/s written %lld/%lld segments %d/%d", id, megabytes, written, expected, done, total))
+            }
         case let .finished(url, quality):
             let relative = "Videos/" + url.lastPathComponent
             LibraryStore.shared.update { state in
@@ -590,6 +601,7 @@ final class AppModel: ObservableObject {
                 state.videos[id] = record
             }
             log(source: "download", message: "Saved \(snapshot.videos[id]?.title ?? id).", level: "info")
+            DebugLog.event("download finished \(id) \(quality) \(url.lastPathComponent)")
             pump()
             if snapshot.settings.notify {
                 NotificationService.notify(title: "Video saved", body: snapshot.videos[id]?.title ?? "Download finished")
@@ -645,6 +657,7 @@ final class AppModel: ObservableObject {
             state.videos[id] = record
         }
         log(source: "download", message: "\(snapshot.videos[id]?.title ?? id): \(message)", level: "error")
+        DebugLog.event("download error \(id) \(message)")
         scheduleRetries()
         pump()
     }

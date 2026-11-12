@@ -193,9 +193,10 @@ struct Settings: Codable, Equatable {
     var maxPages: Int = 2
     var backfillCount: Int = 0
     var dismissedIntro: Bool = false
+    var verboseLog: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case autoDownload, wifiOnly, quality, saveToPhotos, notify, maxPages, backfillCount, dismissedIntro
+        case autoDownload, wifiOnly, quality, saveToPhotos, notify, maxPages, backfillCount, dismissedIntro, verboseLog
     }
 
     init() {}
@@ -210,6 +211,7 @@ struct Settings: Codable, Equatable {
         maxPages = try container.decodeIfPresent(Int.self, forKey: .maxPages) ?? 2
         backfillCount = try container.decodeIfPresent(Int.self, forKey: .backfillCount) ?? 0
         dismissedIntro = try container.decodeIfPresent(Bool.self, forKey: .dismissedIntro) ?? false
+        verboseLog = try container.decodeIfPresent(Bool.self, forKey: .verboseLog) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -222,6 +224,7 @@ struct Settings: Codable, Equatable {
         try container.encode(maxPages, forKey: .maxPages)
         try container.encode(backfillCount, forKey: .backfillCount)
         try container.encode(dismissedIntro, forKey: .dismissedIntro)
+        try container.encode(verboseLog, forKey: .verboseLog)
     }
 }
 

@@ -15,6 +15,7 @@
 		D2CBF6AE19C91358F1BE3098 /* TSRemuxer.swift */ = {isa = PBXBuildFile; fileRef = 3A6215E73BC417CF2318FC00 /* TSRemuxer.swift */; };
 		9C1151590CBF20873286467C /* AppModel.swift */ = {isa = PBXBuildFile; fileRef = B5E5DA50FFEA8AFC09DC37D0 /* AppModel.swift */; };
 		5CE3FF9A88E9F790B9BCC788 /* BackgroundScheduler.swift */ = {isa = PBXBuildFile; fileRef = C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */; };
+		853720E99C9616D568B021C9 /* DebugLog.swift */ = {isa = PBXBuildFile; fileRef = E1EC5EF573D8AAC259DB7468 /* DebugLog.swift */; };
 		6B4FC8A9A8F88C0F7A7D6672 /* DownloadManager.swift */ = {isa = PBXBuildFile; fileRef = A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */; };
 		2778D76B4A337D3238868817 /* RumbleClient.swift */ = {isa = PBXBuildFile; fileRef = 2AB10FA7CFFB276B1A31A971 /* RumbleClient.swift */; };
 		3A4DC8E6C964F0AC3BA660E4 /* ArchiveViews.swift */ = {isa = PBXBuildFile; fileRef = 33097EE659A74408DAA8B695 /* ArchiveViews.swift */; };
@@ -54,6 +55,7 @@
 		3A6215E73BC417CF2318FC00 /* TSRemuxer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Parsing/TSRemuxer.swift"; sourceTree = "<group>"; };
 		B5E5DA50FFEA8AFC09DC37D0 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/AppModel.swift"; sourceTree = "<group>"; };
 		C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/BackgroundScheduler.swift"; sourceTree = "<group>"; };
+		E1EC5EF573D8AAC259DB7468 /* DebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/DebugLog.swift"; sourceTree = "<group>"; };
 		A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/DownloadManager.swift"; sourceTree = "<group>"; };
 		2AB10FA7CFFB276B1A31A971 /* RumbleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Services/RumbleClient.swift"; sourceTree = "<group>"; };
 		33097EE659A74408DAA8B695 /* ArchiveViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views/ArchiveViews.swift"; sourceTree = "<group>"; };
@@ -110,6 +112,7 @@
 				3A6215E73BC417CF2318FC00 /* TSRemuxer.swift */,
 				B5E5DA50FFEA8AFC09DC37D0 /* AppModel.swift */,
 				C70D2998C04A7A2DD36CEFBD /* BackgroundScheduler.swift */,
+				E1EC5EF573D8AAC259DB7468 /* DebugLog.swift */,
 				A9461EFA8BD9497E72DB3D65 /* DownloadManager.swift */,
 				2AB10FA7CFFB276B1A31A971 /* RumbleClient.swift */,
 				33097EE659A74408DAA8B695 /* ArchiveViews.swift */,
@@ -263,6 +266,7 @@
 				D2CBF6AE19C91358F1BE3098 /* TSRemuxer.swift */,
 				9C1151590CBF20873286467C /* AppModel.swift */,
 				5CE3FF9A88E9F790B9BCC788 /* BackgroundScheduler.swift */,
+				853720E99C9616D568B021C9 /* DebugLog.swift */,
 				6B4FC8A9A8F88C0F7A7D6672 /* DownloadManager.swift */,
 				2778D76B4A337D3238868817 /* RumbleClient.swift */,
 				3A4DC8E6C964F0AC3BA660E4 /* ArchiveViews.swift */,
@@ -340,7 +344,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -350,7 +354,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "( $(inherited), @executable_path/Frameworks )";
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.2.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.fuentesarchive;
@@ -377,7 +381,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -385,7 +389,7 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "( $(inherited), @executable_path/Frameworks )";
-				MARKETING_VERSION = 1.1.0;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.local.fuentesarchive;
 				PRODUCT_NAME = FuentesArchive;
 				SDKROOT = iphoneos;

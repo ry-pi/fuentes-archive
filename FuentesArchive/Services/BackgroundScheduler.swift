@@ -8,6 +8,7 @@ enum BackgroundScheduler {
     static let processingID = "com.local.fuentesarchive.processing"
 
     static func register() {
+        DebugLog.event("background tasks registered")
         BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshID, using: nil) { task in
             guard let task = task as? BGAppRefreshTask else { return }
             handle(task, trigger: "background-refresh")
@@ -24,12 +25,17 @@ enum BackgroundScheduler {
     }
 
     private static func handle(_ task: BGTask, trigger: String) {
+        DebugLog.event("background \(trigger) started")
         let work = Task { @MainActor in
             await AppModel.shared.syncAndWait(trigger: trigger)
         }
-        task.expirationHandler = { work.cancel() }
+        task.expirationHandler = {
+            DebugLog.event("background \(trigger) expired")
+            work.cancel()
+        }
         Task {
             _ = await work.value
+            DebugLog.event("background \(trigger) finished cancelled=\(work.isCancelled)")
             task.setTaskCompleted(success: !work.isCancelled)
             scheduleAll()
         }
@@ -38,7 +44,12 @@ enum BackgroundScheduler {
     private static func scheduleRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: refreshID)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
-        try? BGTaskScheduler.shared.submit(request)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            DebugLog.detail("scheduled background refresh")
+        } catch {
+            DebugLog.event("background refresh schedule failed \(error.localizedDescription)")
+        }
     }
 
     private static func scheduleProcessing() {
@@ -46,7 +57,12 @@ enum BackgroundScheduler {
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
         request.earliestBeginDate = Date(timeIntervalSinceNow: 30 * 60)
-        try? BGTaskScheduler.shared.submit(request)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            DebugLog.detail("scheduled background processing")
+        } catch {
+            DebugLog.event("background processing schedule failed \(error.localizedDescription)")
+        }
     }
 }
 

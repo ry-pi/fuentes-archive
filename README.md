@@ -27,7 +27,7 @@ The page also links pages 2, 3, 4, and 48 (25 videos per page).
 
 - On launch, on pull-to-refresh, and from a background refresh, it reads the Videos tab and remembers every video it sees.
 - The first successful sync is a **baseline**. Videos already on the channel are listed and are not downloaded. Later syncs walk forward until a page is entirely videos already seen, and queue every new public video in that span (so a burst that spills past page 1 is not missed). This is so the first launch does not try to save a thousand multi-gigabyte files. Hiding a video remembers its id, so restoring it does not immediately download it again.
-- Tap a video to choose a rendition. Every published height is listed, with an MP4 and, for the segmented streams Rumble actually serves, an MPEG-TS copy. Audio only saves the AAC track as M4A. Each row shows the file size from the embed when Rumble publishes one, otherwise a `~` estimate from bitrate and duration (or from the playlist’s byte ranges / a HEAD request). A video that is already saved stays listed, with Play and Delete, and you can download a different variant beside it. Automatic downloads still use the quality chosen in Settings, not this sheet.
+- Tap a video to choose a rendition. Each height is one row. A direct MP4 or WebM is downloaded as that single file. If Rumble only published HLS, the row says HLS and the pieces are fetched in parallel, then saved as MP4. Audio only saves the AAC track as M4A. Sizes come from Rumble’s format metadata, or a HEAD of a direct file. The playlist’s own length is not shown. A video that is already saved stays listed, with Play and Delete, and you can download a different variant beside it. Automatic downloads still use the quality chosen in Settings, not this sheet.
 - The **Downloads** tab lists queued, active, paused, waiting, failed, and finished items, with progress, speed, and time remaining while bytes are moving. Pause and Resume are per item, and Pause all / Resume all cover the list. Pause survives a relaunch: a single file keeps URLSession resume data, and a segmented download keeps the pieces it already wrote and continues at the next missing piece. Stop cancels the transfer and deletes the partial. The tab badge counts items that are downloading or queued. Settings stays in the Videos toolbar.
 - Files are written to the app’s Documents folder (`On My iPhone → Fuentes Archive → Videos`) because `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` are set. They show up in the Files app.
 - Optional: also copy a finished file into Photos. Off by default.
@@ -84,17 +84,19 @@ For each download:
 3. Try `https://rumble.com/embedJS/u3/?request=video&ver=2&v=<embed id>`.
 4. If that response is not JSON (Cloudflare often challenges it), open `https://rumble.com/embed/<embed id>` and parse the player object assigned to `p.f["<embed id>"]`. The assignment ends with `,loaded:v()`, which is JavaScript and is stripped before JSON parsing.
 
-The player `ua` map has several kinds of URL:
+The player `ua` map is read the same way yt-dlp’s Rumble extractor reads `embedJS/u3` (`request=video&ver=2`):
 
-- **mp4 / webm** — one progressive file. Preferred when it exists (older uploads).
-- **tar** — a per-quality HLS media playlist stored as a byte range inside a `.tar`. Current Videos-tab uploads use this. The pieces are MPEG-TS with H.264 and AAC. They are remuxed into an MP4 after the download, not left as a raw concatenation unless remux fails.
-- **hls / auto** — a master playlist of those same tar playlists. Used if a sized rendition is missing.
-- **timeline** — a tiny MP4 scrub preview (about 11 kbps). It is an MP4 and it is **not** the movie. The resolver never selects it.
-- **audio** — a standalone AAC file. Not selected as the video.
+- **mp4 / webm** — one progressive file, with `meta.size`, bitrate, and width/height. This is the download. One URLSession task, no remux.
+- **tar** — skipped as a file format, matching yt-dlp. Those URLs are HLS chunklists (`r_file=chunklist.m3u8`). Their Content-Length is the playlist, a few dozen kilobytes, not the movie. `meta.size` on the entry is still the real rendition size and is what the sheet shows.
+- **hls** — the fallback when no progressive file exists. The rendition’s media playlist is fetched as up to 8 parallel foreground downloads, then remuxed to MP4.
+- **timeline** — a tiny MP4 scrub preview. Never selected.
+- **audio** — a standalone AAC file, packaged to M4A.
 
-“Best” picks the highest real rendition. A cap such as 720p picks the highest rendition at or below that height. The Alex Jones video exposes 240/360, 480, 720, and 1080. Best selects the 1080p tar, not the timeline MP4.
+A quality cap such as 720p applies to progressive files directly. When the only source is HLS, the master playlist is parsed and the same cap is applied there. The options sheet lists one row per height. Sizes come from `meta.size`, or from a HEAD of a direct file when that metadata is missing. Playlist and chunklist lengths are never shown.
 
-Downloads use a background `URLSession`, so a transfer keeps going after you leave the app. A user pause is stored as its own status and is not resumed by Wi-Fi, launch, or a retry. Progressive files keep resume data from `cancel(byProducingResumeData:)`. Segmented downloads keep a manifest, the output type (MP4, MPEG-TS, or audio-only M4A), and the pieces already written, and continue at the first missing piece. A failed piece is retried up to five times (30s, 2m, 10m, 30m, 2h). HTTP 404, 410, and 451 are not retried. Other people’s videos and members-only items are not retried forever.
+Active downloads use a foreground URLSession so a single MP4, or eight HLS pieces at once, can run at line rate while the app is open. A background URLSession is still connected for tasks iOS already handed the app, but new transfers are not fed through `nsurlsessiond`, which was throttling the piece-by-piece path. iOS will suspend a foreground transfer when the app is suspended. A user pause is stored as its own status and is not resumed by Wi-Fi, launch, or a retry. Progressive files keep resume data from `cancel(byProducingResumeData:)`. Segmented downloads keep the pieces already written and continue at the first missing one. A failed piece is retried up to five times (30s, 2m, 10m, 30m, 2h). HTTP 404, 410, and 451 are not retried.
+
+Settings → Debug log keeps a rotating text file (about 2 MB) of sync steps, the format that was chosen, download throughput, remux results, and background-task events. Verbose adds every HTTP request and progress sample. Copy, Share, and Clear are on that screen.
 
 If the phone does not have room for the estimated size plus 64 MB, the download fails with a clear error instead of filling the disk.
 
@@ -102,7 +104,7 @@ If the phone does not have room for the estimated size plus 64 MB, the download 
 
 Two different mechanisms are easy to mix up:
 
-1. **A download that has already started** uses a background URL session (`com.local.fuentesarchive.downloads`). iOS is reasonably good at finishing that transfer after the app is suspended. It still pauses on Low Power Mode, when the system is under pressure, and when Wi-Fi only is on and you are on cellular.
+1. **A download that has already started** runs in a foreground URL session while Fuentes Archive is open, which is what makes a large MP4 or a parallel HLS fetch actually fast. When iOS suspends the app, that transfer pauses. It resumes from the saved resume data or the next missing piece the next time the app is open. It also pauses on Low Power Mode only to the extent iOS suspends the process, and when Wi-Fi only is on and you are on cellular.
 2. **Noticing a new upload** uses `BGTaskScheduler`: a `BGAppRefreshTask` (`com.local.fuentesarchive.refresh`, earliest 15 minutes) and a `BGProcessingTask` (`com.local.fuentesarchive.processing`, earliest 30 minutes, requires network, does not require power). iOS does **not** promise these will run on a schedule. They often wait hours. They may not run at all if the app is force-quit, if Background App Refresh is off, or if you rarely open the app. The practical way to catch a new video quickly is to open the app or pull to refresh.
 
 There is no push entitlement. A free SideStore Apple ID cannot use push, and this app does not ask for it. The optional notification is a **local** notification fired when a download finishes while the app is running or woken for the background session.
@@ -190,7 +192,7 @@ Minimum system: iOS 17. iPhone and iPad.
 - **No IPA was produced in this environment.** There is no Xcode here. CI is set up to build it.
 - **Cloudflare** sits in front of channel HTML from a lot of datacenter addresses. Direct fetches of the Videos tab from this network returned 403. A reader proxy could render page 1 (that is how the live titles were confirmed) but not page 2. The app uses `URLSession` with a Safari user agent, which is a normal iPhone client and usually gets the HTML. If a network still shows the challenge, the library is left alone and the error is shown. An empty parse is not treated as “the channel deleted everything”.
 - **Page 2 of the live site** could not be rendered from here. Pagination is still covered: the live page-1 HTML has `rel=next` and links through page 48, and a same-crawl archive of page 2 (3 November 2026, 25 different videos, next page 3) is a fixture. The first title on that page is “I'M SICK OF THESE FREAKS!!!”, which is not on page 1 of that crawl.
-- **Current uploads are MPEG-TS inside a tar-backed HLS playlist.** After the pieces are on disk, the app remuxes them to a regular H.264/AAC MP4 (moov at the end, 64-bit offsets) so Photos and the in-app player get a normal movie. A real low-quality segment was remuxed here and `ffmpeg` decoded it (640×360, AAC). If remux fails, the app falls back to a concatenated `.ts` in Files and does not send that file to Photos.
+- **Many current uploads have no progressive MP4.** yt-dlp skips the `tar` entry because it is an HLS playlist. This app does the same and downloads that rendition as parallel HLS pieces, then remuxes them to a regular H.264/AAC MP4 so Photos and the in-app player get a normal movie. A direct MP4 is saved as-is, with no remux. If remux fails, the app falls back to a concatenated `.ts` in Files and does not send that file to Photos.
 - **The timeline MP4 is a trap.** It looks like a video file and it is not the episode. Tests lock that it is never chosen.
 - **Background discovery is best-effort.** See above. Do not expect a new upload to appear within minutes if you never open the app.
 - **Wi-Fi only and disk space.** A single episode can be 1–4 GB. The default will wait for an unmetered, unconstrained network.

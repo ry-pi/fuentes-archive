@@ -17,11 +17,13 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
 
     var onEvent: ((String, DownloadEvent) -> Void)?
     private var session: URLSession!
+    /// Foreground session. Background URLSession (nsurlsessiond) throttles a long list of small HLS pieces.
+    private var transfer: URLSession!
     private let lock = NSLock()
     private var jobs: [String: Job] = [:]
-    private var taskNotes: [Int: TaskNote] = [:]
-    private var handledTasks: Set<Int> = []
-    private let maxInFlight = 3
+    private var taskNotes: [ObjectIdentifier: TaskNote] = [:]
+    private var handledTasks: Set<ObjectIdentifier> = []
+    private let maxInFlight = 8
     private var backgroundCompletion: (() -> Void)?
     private var sessionEventsFinished = false
     private var minimumGeneration: [String: Int] = [:]
@@ -83,14 +85,39 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
     }
 
     func reconnect() {
+        if transfer == nil {
+            let configuration = URLSessionConfiguration.default
+            configuration.httpMaximumConnectionsPerHost = 8
+            configuration.timeoutIntervalForRequest = 60
+            configuration.timeoutIntervalForResource = 60 * 60 * 6
+            configuration.waitsForConnectivity = true
+            transfer = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        }
         if session != nil { return }
         let configuration = URLSessionConfiguration.background(withIdentifier: Self.sessionID)
         configuration.isDiscretionary = false
         configuration.sessionSendsLaunchEvents = true
-        configuration.httpMaximumConnectionsPerHost = 4
+        configuration.httpMaximumConnectionsPerHost = 8
         configuration.timeoutIntervalForResource = 60 * 60 * 6
         configuration.waitsForConnectivity = true
         session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    }
+
+    private func collectTasks(_ completion: @escaping ([URLSessionTask]) -> Void) {
+        reconnect()
+        let group = DispatchGroup()
+        let box = NSLock()
+        var collected: [URLSessionTask] = []
+        for current in [transfer, session].compactMap({ $0 }) {
+            group.enter()
+            current.getAllTasks { tasks in
+                box.lock()
+                collected.append(contentsOf: tasks)
+                box.unlock()
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) { completion(collected) }
     }
 
     /// If the system already finished delivering events before the relaunch handler was stored, call it now.
@@ -109,14 +136,13 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
     }
 
     func liveTasks(_ completion: @escaping ([LiveTask]) -> Void) {
-        reconnect()
-        session.getAllTasks { tasks in
+        collectTasks { tasks in
             var live: [LiveTask] = []
             for task in tasks {
                 if let note = self.note(for: task) {
                     live.append(LiveTask(videoID: note.videoID, index: note.index, generation: note.generation))
                     self.lock.lock()
-                    self.taskNotes[task.taskIdentifier] = note
+                    self.taskNotes[ObjectIdentifier(task)] = note
                     self.lock.unlock()
                 }
             }
@@ -135,6 +161,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         lock.unlock()
         let quality = audioOnly ? "Audio only" : "\(variant.height)p \(container.uppercased())"
         let segmented = variant.kind == "tar" || variant.kind == "hls" || variant.url.contains(".m3u8") || variant.url.contains(".tar")
+        DebugLog.event("download start \(videoID) \(quality) direct=\(!segmented) bytes=\(variant.size) \(variant.url)")
         if !segmented {
             guard let url = URL(string: variant.url) else {
                 emit(videoID, .failed("The stream URL was invalid.", nil))
@@ -207,7 +234,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             lock.lock()
             jobs[videoID] = Job(segments: [], ext: ext, quality: quality, nextIndex: 0, inFlight: 1, retries: [:], retryIndexes: [], singleFile: true, failed: false, allowCellular: allowCellular, generation: 1, busy: [], audioOnly: audioOnly)
             lock.unlock()
-            let task = session.downloadTask(withResumeData: data)
+            let task = transfer.downloadTask(withResumeData: data)
             remember(task, TaskNote(videoID: videoID, index: nil, generation: 1))
             task.resume()
             return true
@@ -231,7 +258,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         jobs[videoID]?.failed = true
         let generation = jobs[videoID]?.generation ?? -1
         lock.unlock()
-        session.getAllTasks { tasks in
+        collectTasks { tasks in
             let mine = tasks.filter { task in
                 guard let note = self.note(for: task) else { return false }
                 return note.videoID == videoID && note.generation == generation
@@ -273,7 +300,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         minimumGeneration[videoID] = generation
         jobs[videoID] = nil
         lock.unlock()
-        session.getAllTasks { tasks in
+        collectTasks { tasks in
             for task in tasks {
                 guard let note = self.note(for: task), note.videoID == videoID, note.generation < generation else { continue }
                 task.cancel()
@@ -288,7 +315,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let dest = folder.appendingPathComponent(note.index.map { String(format: "seg-%05d.part", $0) } ?? "file.bin")
         if !(200..<300).contains(status) {
-            markHandled(downloadTask.taskIdentifier)
+            markHandled(downloadTask)
             noteFailure(note, status: status)
             return
         }
@@ -299,7 +326,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             noteFailure(note, status: nil)
             return
         }
-        markHandled(downloadTask.taskIdentifier)
+        markHandled(downloadTask)
         if note.index == nil {
             finishFile(videoID: note.videoID, temp: dest)
         } else {
@@ -315,9 +342,10 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let note = note(for: task) else { return }
         lock.lock()
-        taskNotes[task.taskIdentifier] = nil
-        let already = handledTasks.contains(task.taskIdentifier)
-        if already { handledTasks.remove(task.taskIdentifier) }
+        let key = ObjectIdentifier(task)
+        taskNotes[key] = nil
+        let already = handledTasks.contains(key)
+        if already { handledTasks.remove(key) }
         lock.unlock()
         guard let error, !already else { return }
         let nsError = error as NSError
@@ -336,6 +364,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         let handler = backgroundCompletion
         backgroundCompletion = nil
         lock.unlock()
+        DebugLog.event("background URLSession events finished")
         DispatchQueue.main.async { handler?() }
     }
 
@@ -385,7 +414,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             var request = URLRequest(url: url)
             request.setValue("https://rumble.com/", forHTTPHeaderField: "Referer")
             request.allowsCellularAccess = allowCellular
-            let task = session.downloadTask(with: request)
+            let task = transfer.downloadTask(with: request)
             remember(task, TaskNote(videoID: videoID, index: index, generation: generation))
             task.resume()
         }
@@ -412,6 +441,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
     private func noteFailure(_ note: TaskNote, status: Int?) {
         guard note.generation == generation(of: note.videoID) else { return }
         if note.index == nil {
+            DebugLog.event("download failed \(note.videoID) HTTP \(status.map(String.init) ?? "-")")
             emit(note.videoID, .failed(status.map { "Download failed with HTTP \($0)." } ?? "The download was interrupted.", status))
             return
         }
@@ -425,6 +455,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             job.failed = true
             jobs[note.videoID] = job
             lock.unlock()
+            DebugLog.event("segment failed \(note.videoID) #\(note.index ?? -1) HTTP \(status.map(String.init) ?? "-")")
             emit(note.videoID, .failed(status.map { "A piece failed with HTTP \($0)." } ?? "A piece of the video failed.", status))
         } else {
             job.retryIndexes.append(note.index!)
@@ -441,6 +472,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         let snapshot = job
         lock.unlock()
         assembly.async {
+            let started = Date()
             let folder = LibraryStore.shared.partialURL(videoID)
             let pieces = snapshot.segments.indices.map { folder.appendingPathComponent(String(format: "seg-%05d.part", $0)) }
             guard pieces.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
@@ -454,15 +486,18 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 do {
                     try self.concatenate(pieces, to: destination)
                     try? FileManager.default.removeItem(at: folder)
+                    DebugLog.event("assemble \(videoID) concatenated ts \(Self.seconds(since: started))s")
                     self.emit(videoID, .finished(destination, snapshot.quality))
                 } catch {
+                    DebugLog.event("assemble \(videoID) failed to concatenate")
                     self.emit(videoID, .failed("Could not assemble the video file.", nil))
                 }
                 return
             }
             do {
-                _ = try TSRemuxer.remux(files: pieces, to: destination, audioOnly: snapshot.audioOnly)
+                let info = try TSRemuxer.remux(files: pieces, to: destination, audioOnly: snapshot.audioOnly)
                 try? FileManager.default.removeItem(at: folder)
+                DebugLog.event("remux \(videoID) \(destination.pathExtension) \(info.width)x\(info.height) video=\(info.videoSamples) audio=\(info.audioSamples) \(Self.seconds(since: started))s")
                 self.emit(videoID, .finished(destination, snapshot.quality))
             } catch {
                 try? FileManager.default.removeItem(at: destination)
@@ -474,8 +509,10 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 do {
                     try self.concatenate(pieces, to: ts)
                     try? FileManager.default.removeItem(at: folder)
+                    DebugLog.event("remux \(videoID) fell back to ts \(Self.seconds(since: started))s")
                     self.emit(videoID, .finished(ts, snapshot.quality + " · MPEG-TS"))
                 } catch {
+                    DebugLog.event("assemble \(videoID) failed")
                     self.emit(videoID, .failed("Could not assemble the video file.", nil))
                 }
             }
@@ -504,7 +541,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         var request = URLRequest(url: url)
         request.setValue("https://rumble.com/", forHTTPHeaderField: "Referer")
         request.allowsCellularAccess = allowCellular
-        let task = session.downloadTask(with: request)
+        let task = transfer.downloadTask(with: request)
         remember(task, TaskNote(videoID: videoID, index: nil, generation: generation))
         task.resume()
     }
@@ -529,10 +566,16 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             lock.lock()
             jobs[videoID] = nil
             lock.unlock()
+            DebugLog.event("saved \(videoID) \(destination.lastPathComponent) direct file")
             emit(videoID, .finished(destination, quality))
         } catch {
+            DebugLog.event("save failed \(videoID) \(error.localizedDescription)")
             emit(videoID, .failed("Could not move the video into Files.", nil))
         }
+    }
+
+    private static func seconds(since date: Date) -> String {
+        String(format: "%.1f", Date().timeIntervalSince(date))
     }
 
     private func isCurrent(_ videoID: String, _ generation: Int) -> Bool {
@@ -553,9 +596,9 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         return jobs[id]
     }
 
-    private func markHandled(_ identifier: Int) {
+    private func markHandled(_ task: URLSessionTask) {
         lock.lock()
-        handledTasks.insert(identifier)
+        handledTasks.insert(ObjectIdentifier(task))
         lock.unlock()
     }
 
@@ -564,13 +607,13 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             task.taskDescription = String(decoding: data, as: UTF8.self)
         }
         lock.lock()
-        taskNotes[task.taskIdentifier] = note
+        taskNotes[ObjectIdentifier(task)] = note
         lock.unlock()
     }
 
     private func note(for task: URLSessionTask) -> TaskNote? {
         lock.lock()
-        let cached = taskNotes[task.taskIdentifier]
+        let cached = taskNotes[ObjectIdentifier(task)]
         lock.unlock()
         if let cached { return cached }
         guard let raw = task.taskDescription?.data(using: .utf8),
