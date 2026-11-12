@@ -10,7 +10,7 @@ enum TSRemuxer {
         var audioSamples: Int
     }
 
-    static func remux(files: [URL], to destination: URL) throws -> Info {
+    static func remux(files: [URL], to destination: URL, audioOnly: Bool = false) throws -> Info {
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
@@ -22,9 +22,13 @@ enum TSRemuxer {
         let mdatAt = try handle.offset()
         try handle.write(contentsOf: u32(1) + Data("mdat".utf8) + u64(0))
 
-        let demux = try Demuxer(handle: handle).run(files: files)
-        guard demux.videoCount > 0, !demux.sps.isEmpty, !demux.pps.isEmpty else {
-            throw RemuxError.noVideo
+        let demux = try Demuxer(handle: handle, audioOnly: audioOnly).run(files: files)
+        if audioOnly {
+            guard demux.audioCount > 0 else { throw RemuxError.noAudio }
+        } else {
+            guard demux.videoCount > 0, !demux.sps.isEmpty, !demux.pps.isEmpty else {
+                throw RemuxError.noVideo
+            }
         }
         let end = try handle.offset()
         try handle.seek(toOffset: mdatAt + 8)
@@ -34,9 +38,37 @@ enum TSRemuxer {
         return Info(width: demux.width, height: demux.height, videoSamples: demux.videoCount, audioSamples: demux.audioCount)
     }
 
+    static func packageADTS(file: URL, to destination: URL) throws -> Info {
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: destination)
+        defer { try? handle.close() }
+        try handle.write(contentsOf: box("ftyp", Data("M4A ".utf8) + u32(0) + Data("M4A mp42isom".utf8)))
+        let mdatAt = try handle.offset()
+        try handle.write(contentsOf: u32(1) + Data("mdat".utf8) + u64(0))
+        let demux = Demuxer(handle: handle, audioOnly: true)
+        try demux.ingestADTS(file)
+        guard demux.audioCount > 0 else { throw RemuxError.noAudio }
+        let end = try handle.offset()
+        try handle.seek(toOffset: mdatAt + 8)
+        try handle.write(contentsOf: u64(end - mdatAt))
+        try handle.seek(toOffset: end)
+        try handle.write(contentsOf: demux.moov())
+        return Info(width: 0, height: 0, videoSamples: 0, audioSamples: demux.audioCount)
+    }
+
     enum RemuxError: LocalizedError {
         case noVideo
-        var errorDescription: String? { "The video stream could not be remuxed to MP4." }
+        case noAudio
+        var errorDescription: String? {
+            switch self {
+            case .noVideo: return "The video stream could not be remuxed to MP4."
+            case .noAudio: return "The audio track could not be saved."
+            }
+        }
     }
 }
 
@@ -50,6 +82,7 @@ private struct SampleMeta {
 
 private final class Demuxer {
     let handle: FileHandle
+    let audioOnly: Bool
     var sps = Data()
     var pps = Data()
     var width = 0
@@ -67,7 +100,10 @@ private final class Demuxer {
     private var carry: [Int: Data] = [:]
     private var origin: Int64?
 
-    init(handle: FileHandle) { self.handle = handle }
+    init(handle: FileHandle, audioOnly: Bool = false) {
+        self.handle = handle
+        self.audioOnly = audioOnly
+    }
 
     func run(files: [URL]) throws -> Demuxer {
         for file in files {
@@ -82,7 +118,52 @@ private final class Demuxer {
         return self
     }
 
+    func ingestADTS(_ file: URL) throws {
+        let input = try FileHandle(forReadingFrom: file)
+        defer { try? input.close() }
+        var pending = Data()
+        var frameIndex = 0
+        while true {
+            let chunk = try input.read(upToCount: 256 * 1024) ?? Data()
+            if chunk.isEmpty && pending.count < 7 { break }
+            pending.append(chunk)
+            let bytes = [UInt8](pending)
+            var index = 0
+            var produced = false
+            while index + 7 < bytes.count {
+                if bytes[index] != 0xFF || bytes[index + 1] & 0xF0 != 0xF0 {
+                    index += 1
+                    continue
+                }
+                let length = (Int(bytes[index + 3] & 0x03) << 11) | (Int(bytes[index + 4]) << 3) | (Int(bytes[index + 5] & 0xE0) >> 5)
+                guard length >= 7 else { break }
+                guard index + length <= bytes.count else { break }
+                profile = Int((bytes[index + 2] & 0xC0) >> 6) + 1
+                let freqIndex = Int((bytes[index + 2] & 0x3C) >> 2)
+                frequency = freqIndex < frequencies.count ? frequencies[freqIndex] : 44100
+                channels = Int((bytes[index + 2] & 1) << 2 | (bytes[index + 3] & 0xC0) >> 6)
+                let header = 7 + ((bytes[index + 1] & 1) == 0 ? 2 : 0)
+                let frame = Data(bytes[(index + header)..<(index + length)])
+                let step = Int64(1024 * 90000 / max(frequency, 1))
+                let stamp = Int64(frameIndex) * step
+                let offset = try handle.offset()
+                try handle.write(contentsOf: frame)
+                audio.append(SampleMeta(offset: offset, size: UInt32(frame.count), dts: stamp, pts: stamp, key: false))
+                frameIndex += 1
+                produced = true
+                index += length
+            }
+            pending = Data(bytes[index...])
+            if chunk.isEmpty {
+                if !produced { break }
+            }
+        }
+    }
+
     func moov() -> Data {
+        if audioOnly {
+            return audioMoov()
+        }
         let movieTimescale: Int64 = 1000
         let videoDuration = duration(video)
         let audioDuration90 = audio.count > 1 ? (audio.last!.dts - audio.first!.dts) : 0
@@ -107,6 +188,23 @@ private final class Demuxer {
             u32(audio.isEmpty ? 2 : 3)
         ))
         return box("moov", mvhd + tracks)
+    }
+
+    private func audioMoov() -> Data {
+        let scaled = scaledAudio()
+        let audioDuration = duration(scaled)
+        let movie = audioDuration * 1000 / Int64(max(frequency, 1))
+        let track = trak(
+            id: 1, samples: scaled, entry: audioEntry(), handler: "soun", name: "Audio",
+            timescale: Int64(frequency), duration: audioDuration, movie: movie,
+            width: 0, height: 0, volume: 0x0100
+        )
+        let mvhd = fullbox("mvhd", 0, 0, pack(
+            u32(0), u32(0), u32(1000), u32(UInt32(max(0, movie))),
+            u32(0x00010000), u16(0x0100), Data(count: 10), matrix(), Data(count: 24),
+            u32(2)
+        ))
+        return box("moov", mvhd + track)
     }
 
     private static func readPacket(_ input: FileHandle) throws -> Data? {
@@ -162,6 +260,7 @@ private final class Demuxer {
     }
 
     private func writeVideo(_ es: Data, dts: Int64, pts: Int64) throws {
+        if audioOnly { return }
         let nals = nalUnits(es)
         var kept = Data()
         var key = false

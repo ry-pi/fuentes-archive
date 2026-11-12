@@ -35,6 +35,19 @@ enum Format {
         return formatter.string(fromByteCount: count)
     }
 
+    static func rate(_ bytesPerSecond: Double) -> String {
+        guard bytesPerSecond > 1 else { return "" }
+        return bytes(Int64(bytesPerSecond)) + "/s"
+    }
+
+    static func eta(remaining bytes: Int64, rate: Double) -> String {
+        guard rate > 1, bytes > 0 else { return "" }
+        let seconds = Int(Double(bytes) / rate)
+        if seconds >= 3600 { return "\(seconds / 3600)h \(seconds % 3600 / 60)m left" }
+        if seconds >= 60 { return "\(seconds / 60)m \(seconds % 60)s left" }
+        return "\(seconds)s left"
+    }
+
     static func relative(_ date: Date?) -> String {
         guard let date else { return "" }
         let formatter = RelativeDateTimeFormatter()
@@ -50,8 +63,8 @@ extension VideoRecord {
         case .queued: return "Queued"
         case .waitingForWiFi: return "Waiting for Wi-Fi"
         case .downloading:
-            if segmentTotal > 0 { return "Downloading \(Int(progress * 100))%" }
             return "Downloading \(Int(progress * 100))%"
+        case .paused: return "Paused"
         case .downloaded: return "Saved"
         case .failed: return "Failed"
         case .waiting: return disposition == .premiere ? "Premiere" : "Processing"
@@ -63,7 +76,7 @@ extension VideoRecord {
         switch status {
         case .downloaded: return Theme.ok
         case .failed: return Theme.danger
-        case .downloading, .queued: return Theme.gold
+        case .downloading, .queued, .paused: return Theme.gold
         case .waitingForWiFi, .waiting, .skipped: return Theme.muted
         case .catalogued: return Theme.muted
         }
@@ -75,26 +88,28 @@ extension VideoRecord {
     }
 }
 
+struct ActiveBadge: ViewModifier {
+    var count: Int
+    func body(content: Content) -> some View {
+        if count > 0 {
+            content.badge(count)
+        } else {
+            content
+        }
+    }
+}
+
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var selection: String?
 
     var body: some View {
-        Group {
-            if sizeClass == .regular {
-                NavigationSplitView {
-                    library
-                } detail: {
-                    if let selection, let video = model.video(selection) {
-                        VideoDetailView(video: video)
-                    } else {
-                        detailPlaceholder
-                    }
-                }
-            } else {
-                NavigationStack { library }
-            }
+        TabView {
+            NavigationStack { library }
+                .tabItem { Label("Videos", systemImage: "play.rectangle.on.rectangle") }
+            NavigationStack { DownloadsView() }
+                .modifier(ActiveBadge(count: model.activeDownloadCount))
+                .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
         }
         .preferredColorScheme(.dark)
         .tint(Theme.gold)
@@ -104,27 +119,12 @@ struct RootView: View {
         LibraryView(selection: $selection)
     }
 
-    private var detailPlaceholder: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "play.rectangle.on.rectangle")
-                .font(.system(size: 42))
-                .foregroundStyle(Theme.gold)
-            Text("Select a video")
-                .font(.title3.weight(.semibold))
-            Text("Only the Videos tab is archived. Shorts and livestreams stay on Rumble.")
-                .font(.subheadline)
-                .foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.background)
-    }
 }
 
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var selection: String?
+    @State private var optionsID: String?
 
     var body: some View {
         let items = model.videos()
@@ -145,9 +145,13 @@ struct LibraryView: View {
                     .listRowSeparator(.hidden)
             } else {
                 ForEach(items) { video in
-                    NavigationLink(value: video.id) {
+                    Button {
+                        selection = video.id
+                        optionsID = video.id
+                    } label: {
                         VideoRow(video: video)
                     }
+                    .buttonStyle(.plain)
                     .listRowBackground(Theme.card)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { model.hide(video.id) } label: {
@@ -184,9 +188,9 @@ struct LibraryView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("Fuentes Archive")
-        .navigationDestination(for: String.self) { id in
-            if let video = model.video(id) {
-                VideoDetailView(video: video)
+        .sheet(isPresented: Binding(get: { optionsID != nil }, set: { if !$0 { optionsID = nil } })) {
+            if let optionsID {
+                DownloadOptionsSheet(videoID: optionsID)
             }
         }
         .searchable(text: $model.search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
@@ -622,6 +626,190 @@ struct RefreshLogView: View {
         .toolbar {
             Button("Clear") { model.clearLog() }
         }
+    }
+}
+
+struct DownloadOptionsSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let videoID: String
+    @State private var choices: [DownloadChoice] = []
+    @State private var loading = true
+    @State private var error: String?
+    @State private var play = false
+
+    private var video: VideoRecord? { model.video(videoID) }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let video, video.status == .downloaded, video.fileURL != nil {
+                    Section("Saved on this iPhone") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(video.qualityLabel ?? "Saved file")
+                                .font(.headline)
+                            if let url = video.fileURL {
+                                Text(Format.bytes(Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)))
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.muted)
+                            }
+                        }
+                        Button("Play") { play = true }
+                        Button("Delete saved file", role: .destructive) { model.deleteFile(videoID) }
+                    }
+                }
+                Section("Download another copy") {
+                    if loading {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Reading available qualities…")
+                        }
+                    } else if let error {
+                        Text(error).foregroundStyle(.red)
+                        Button("Try again") { Task { await load() } }
+                    } else if choices.isEmpty {
+                        Text("No downloadable renditions were published for this video.")
+                            .foregroundStyle(Theme.muted)
+                    } else {
+                        ForEach(choices) { choice in
+                            Button {
+                                model.download(videoID, choice: choice)
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(choice.title)
+                                        Text(choice.detail)
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.muted)
+                                    }
+                                    Spacer()
+                                    Text(choice.sizeLabel)
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundStyle(Theme.gold)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(video?.title ?? "Download")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .preferredColorScheme(.dark)
+        .task { await load() }
+        .fullScreenCover(isPresented: $play) {
+            if let video { PlayerScreen(video: video) }
+        }
+    }
+
+    private func load() async {
+        guard let video else {
+            error = "This video is no longer in the library."
+            loading = false
+            return
+        }
+        loading = true
+        error = nil
+        do {
+            choices = try await model.offers(for: video)
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        loading = false
+    }
+}
+
+struct DownloadsView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let rows = model.downloadRows()
+        List {
+            if rows.isEmpty {
+                ContentUnavailableView("No downloads yet", systemImage: "arrow.down.circle", description: Text("Open a video and pick a quality. Active, paused, failed, and finished items stay here."))
+                    .listRowBackground(Color.clear)
+            } else {
+                Section {
+                    HStack {
+                        Button("Pause all") { model.pauseAll() }
+                            .disabled(!rows.contains { $0.status == .downloading || $0.status == .queued })
+                        Spacer()
+                        Button("Resume all") { model.resumeAll() }
+                            .disabled(!rows.contains { $0.status == .paused || $0.status == .waitingForWiFi })
+                    }
+                }
+                ForEach(rows) { video in
+                    DownloadRow(video: video)
+                }
+            }
+        }
+        .navigationTitle("Downloads")
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+    }
+}
+
+struct DownloadRow: View {
+    @EnvironmentObject private var model: AppModel
+    let video: VideoRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(video.title).font(.headline).lineLimit(2)
+            Text(statusLine)
+                .font(.caption)
+                .foregroundStyle(Theme.muted)
+            if video.status == .downloading || video.status == .paused {
+                ProgressView(value: min(max(video.progress, 0), 1))
+                    .tint(Theme.gold)
+            }
+            HStack {
+                if video.status == .paused || video.status == .failed || video.status == .waitingForWiFi {
+                    Button("Resume") { model.resumeDownload(video.id) }
+                } else if video.status == .downloading || video.status == .queued {
+                    Button("Pause") { model.pauseDownload(video.id) }
+                }
+                if video.status != .downloaded {
+                    Button("Stop", role: .destructive) { model.stopDownload(video.id) }
+                }
+                Spacer()
+                Text(sizeLine)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Theme.muted)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var statusLine: String {
+        var parts = [video.status.label]
+        if let label = video.qualityLabel { parts.append(label) }
+        if video.status == .downloading {
+            let speed = Format.rate(video.bytesPerSecond)
+            if !speed.isEmpty { parts.append(speed) }
+            let remaining = max(video.bytesExpected - video.bytesWritten, 0)
+            let eta = Format.eta(remaining: remaining, rate: video.bytesPerSecond)
+            if !eta.isEmpty { parts.append(eta) }
+        }
+        if let error = video.errorMessage, video.status == .failed { parts.append(error) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var sizeLine: String {
+        if video.bytesExpected > 0 {
+            return Format.bytes(video.bytesWritten) + " / " + Format.bytes(video.bytesExpected)
+        }
+        return Format.bytes(video.bytesWritten)
     }
 }
 

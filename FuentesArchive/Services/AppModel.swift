@@ -119,11 +119,146 @@ final class AppModel: ObservableObject {
             guard var record = state.videos[id] else { return }
             if resetAttempts { record.attemptCount = 0 }
             record.errorMessage = nil
+            record.request = nil
             record.status = .queued
             record.updatedAt = Date()
             state.videos[id] = record
         }
         pump()
+    }
+
+    func download(_ id: String, choice: DownloadChoice) {
+        guard let record = snapshot.videos[id], record.disposition == .downloadable else { return }
+        DownloadManager.shared.cancel(videoID: id)
+        LibraryStore.shared.update { state in
+            guard var record = state.videos[id] else { return }
+            record.request = DownloadRequest(
+                url: choice.url,
+                kind: choice.kind,
+                height: choice.height,
+                audioOnly: choice.audioOnly,
+                container: choice.container,
+                bytes: choice.bytes,
+                label: choice.title + " · " + choice.detail
+            )
+            record.qualityLabel = record.request?.label
+            record.bytesExpected = choice.bytes
+            record.errorMessage = nil
+            record.attemptCount = 0
+            record.progress = 0
+            record.bytesWritten = 0
+            record.segmentDone = 0
+            record.segmentTotal = 0
+            record.status = .queued
+            record.updatedAt = Date()
+            state.videos[id] = record
+        }
+        pump()
+    }
+
+    var activeDownloadCount: Int {
+        snapshot.videos.values.filter { $0.status == .downloading || $0.status == .queued }.count
+    }
+
+    func downloadRows() -> [VideoRecord] {
+        let order: [DownloadStatus] = [.downloading, .queued, .paused, .waitingForWiFi, .failed, .downloaded]
+        return snapshot.videos.values.filter { order.contains($0.status) }.sorted { left, right in
+            let leftIndex = order.firstIndex(of: left.status) ?? 0
+            let rightIndex = order.firstIndex(of: right.status) ?? 0
+            if leftIndex != rightIndex { return leftIndex < rightIndex }
+            return left.updatedAt > right.updatedAt
+        }
+    }
+
+    func pauseDownload(_ id: String) {
+        LibraryStore.shared.update { state in
+            guard var record = state.videos[id] else { return }
+            guard record.status == .downloading || record.status == .queued || record.status == .waitingForWiFi else { return }
+            record.status = .paused
+            record.bytesPerSecond = 0
+            record.errorMessage = nil
+            record.updatedAt = Date()
+            state.videos[id] = record
+        }
+        DownloadManager.shared.pause(videoID: id, user: true)
+    }
+
+    func resumeDownload(_ id: String) {
+        guard let record = snapshot.videos[id] else { return }
+        guard record.status == .paused || record.status == .waitingForWiFi || record.status == .failed else { return }
+        if settings.wifiOnly && pathReady && !onWiFi {
+            LibraryStore.shared.update { state in
+                guard var record = state.videos[id] else { return }
+                record.status = .waitingForWiFi
+                record.errorMessage = "Waiting for Wi-Fi."
+                record.updatedAt = Date()
+                state.videos[id] = record
+            }
+            return
+        }
+        LibraryStore.shared.update { state in
+            guard var record = state.videos[id] else { return }
+            record.status = .downloading
+            record.errorMessage = nil
+            record.updatedAt = Date()
+            state.videos[id] = record
+        }
+        let resumed = DownloadManager.shared.resume(videoID: id, allowCellular: !settings.wifiOnly)
+        if !resumed {
+            LibraryStore.shared.update { state in
+                guard var record = state.videos[id] else { return }
+                record.status = .queued
+                state.videos[id] = record
+            }
+            start(id)
+        }
+    }
+
+    func offers(for video: VideoRecord) async throws -> [DownloadChoice] {
+        guard let watch = URL(string: video.watchURL) else { throw RumbleError.noStream }
+        let variants = try await client.variants(for: watch)
+        var choices = DownloadOffers.build(variants: variants, duration: video.duration)
+        for index in choices.indices where choices[index].estimated {
+            let choice = choices[index]
+            guard let url = URL(string: choice.url) else { continue }
+            if choice.kind == "tar" || choice.kind == "hls" || choice.url.contains(".m3u8") {
+                if let playlist = try? await client.text(url) {
+                    choices[index] = DownloadOffers.applyingPlaylistBytes(choice, playlistBytes: DownloadOffers.summedRangeBytes(playlist))
+                }
+            } else if let length = await client.contentLength(url) {
+                choices[index] = DownloadOffers.applyingPlaylistBytes(choice, playlistBytes: length)
+            }
+        }
+        return choices
+    }
+
+    func pauseAll() {
+        for record in snapshot.videos.values where record.status == .downloading || record.status == .queued {
+            pauseDownload(record.id)
+        }
+    }
+
+    func resumeAll() {
+        let ids = snapshot.videos.values.filter { $0.status == .paused || $0.status == .waitingForWiFi }.map(\.id)
+        for id in ids { resumeDownload(id) }
+    }
+
+    func stopDownload(_ id: String) {
+        let saved = snapshot.videos[id]?.relativePath
+        DownloadManager.shared.cancel(videoID: id)
+        try? FileManager.default.removeItem(at: LibraryStore.shared.partialURL(id))
+        LibraryStore.shared.update { state in
+            guard var record = state.videos[id] else { return }
+            record.progress = saved == nil ? 0 : 1
+            record.bytesWritten = 0
+            record.bytesPerSecond = 0
+            record.segmentDone = 0
+            record.segmentTotal = 0
+            record.errorMessage = nil
+            record.status = saved == nil ? .catalogued : .downloaded
+            record.updatedAt = Date()
+            state.videos[id] = record
+        }
     }
 
     func downloadNewest(_ count: Int) {
@@ -365,21 +500,41 @@ final class AppModel: ObservableObject {
             state.videos[id]?.updatedAt = Date()
         }
         record.status = .downloading
+        DownloadManager.shared.allowStart(id)
         let cap = snapshot.settings.quality.capHeight
+        let request = record.request
         Task {
             do {
-                guard let watch = URL(string: record.watchURL) else { throw RumbleError.noStream }
-                let variant = try await client.resolve(watch: watch, capHeight: cap)
+                let variant: Variant
+                let audioOnly: Bool
+                let container: String
+                if let request {
+                    variant = Variant(kind: request.kind, height: request.height, bitrate: 0, size: request.bytes, url: request.url, timeline: false, audioOnly: request.audioOnly)
+                    audioOnly = request.audioOnly
+                    container = request.container
+                } else {
+                    guard let watch = URL(string: record.watchURL) else { throw RumbleError.noStream }
+                    variant = try await client.resolve(watch: watch, capHeight: cap)
+                    audioOnly = false
+                    container = "mp4"
+                }
+                guard self.snapshot.videos[id]?.status != .paused else { return }
                 DownloadManager.shared.begin(
                     videoID: id,
                     title: record.title,
                     variant: variant,
                     capHeight: cap,
-                    allowCellular: !self.snapshot.settings.wifiOnly
+                    allowCellular: !self.snapshot.settings.wifiOnly,
+                    audioOnly: audioOnly,
+                    container: container
                 )
+                let label = request?.label ?? "\(variant.height)p"
+                let bytes = request?.bytes ?? variant.size
                 LibraryStore.shared.update { state in
-                    state.videos[id]?.qualityLabel = "\(variant.height)p"
-                    state.videos[id]?.bytesExpected = variant.size
+                    guard var record = state.videos[id] else { return }
+                    if record.qualityLabel == nil { record.qualityLabel = label }
+                    if bytes > 0 { record.bytesExpected = bytes }
+                    state.videos[id] = record
                 }
             } catch let error as RumbleError {
                 if case .members = error {
@@ -404,12 +559,21 @@ final class AppModel: ObservableObject {
             if fraction < 0.999, let last = lastProgressWrite[id], now.timeIntervalSince(last) < 0.5 { return }
             lastProgressWrite[id] = now
             LibraryStore.shared.update { state in
-                state.videos[id]?.status = .downloading
-                state.videos[id]?.progress = fraction
-                if written > 0 { state.videos[id]?.bytesWritten = written }
-                if expected > 0 { state.videos[id]?.bytesExpected = expected }
-                state.videos[id]?.segmentDone = done
-                state.videos[id]?.segmentTotal = total
+                guard var record = state.videos[id] else { return }
+                if record.status == .paused { return }
+                let previousBytes = record.bytesWritten
+                let elapsed = Date().timeIntervalSince(record.updatedAt)
+                record.status = .downloading
+                record.progress = fraction
+                if written > 0 { record.bytesWritten = written }
+                if expected > 0 { record.bytesExpected = expected }
+                record.segmentDone = done
+                record.segmentTotal = total
+                if written > previousBytes, elapsed > 0.3 {
+                    record.bytesPerSecond = Double(written - previousBytes) / elapsed
+                }
+                record.updatedAt = Date()
+                state.videos[id] = record
             }
         case let .finished(url, quality):
             let relative = "Videos/" + url.lastPathComponent
@@ -440,14 +604,25 @@ final class AppModel: ObservableObject {
                         }
                     }
                 } else {
-                    log(source: "photos", message: "Photos did not get a copy because the file stayed MPEG-TS. It is in Files and plays in the app.", level: "error")
+                    log(source: "photos", message: "Photos only receives an MP4. This copy is in Files and plays in the app.", level: "error")
                 }
             }
-        case .paused:
+        case let .paused(user):
             LibraryStore.shared.update { state in
-                guard state.videos[id]?.status == .downloading || state.videos[id]?.status == .queued else { return }
-                state.videos[id]?.status = .waitingForWiFi
-                state.videos[id]?.errorMessage = "Waiting for Wi-Fi."
+                guard var record = state.videos[id] else { return }
+                if record.status == .paused { return }
+                if user {
+                    record.status = .paused
+                    record.errorMessage = nil
+                } else if record.status == .downloading || record.status == .queued {
+                    record.status = .waitingForWiFi
+                    record.errorMessage = "Waiting for Wi-Fi."
+                } else {
+                    return
+                }
+                record.bytesPerSecond = 0
+                record.updatedAt = Date()
+                state.videos[id] = record
             }
         case let .failed(message, status):
             fail(id, message: message, status: status)
@@ -485,7 +660,7 @@ final class AppModel: ObservableObject {
 
     private func pauseForNetwork() {
         for record in snapshot.videos.values where record.status == .downloading || record.status == .queued {
-            DownloadManager.shared.pause(videoID: record.id)
+            DownloadManager.shared.pause(videoID: record.id, user: false)
         }
     }
 

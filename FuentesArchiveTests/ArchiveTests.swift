@@ -166,6 +166,60 @@ final class ArchiveTests: XCTestCase {
         XCTAssertFalse(RetryPolicy.shouldRetry(httpStatus: 503, attempt: 5))
     }
 
+    func testDownloadOffersUseExactSizesAndKeepEveryHeight() throws {
+        let player = try json("player-alex.json")
+        let choices = DownloadOffers.build(variants: StreamResolver.variants(from: player), duration: 4023)
+        let video = choices.filter { !$0.audioOnly }
+        let heights = video.map(\.height)
+        XCTAssertEqual(Array(Set(heights)).sorted(), [360, 480, 720, 1080])
+        XCTAssertEqual(video.map(\.estimated), Array(repeating: false, count: video.count))
+        let containers = Dictionary(grouping: video, by: \.height).mapValues { $0.map(\.container).sorted() }
+        XCTAssertEqual(containers[1080], ["mp4", "ts"])
+        XCTAssertEqual(video.first { $0.height == 1080 && $0.container == "mp4" }?.bytes, 2_070_835_200)
+        let audio = choices.filter(\.audioOnly)
+        XCTAssertEqual(audio.count, 1)
+        XCTAssertEqual(audio.map(\.bytes), [96_550_801])
+        XCTAssertEqual(audio.map(\.estimated), [false])
+        XCTAssertEqual(audio.map(\.container), ["m4a"])
+        let exact = DownloadOffers.estimate(exact: 50, bitrateKbps: 1000, duration: 8)
+        XCTAssertEqual(exact.bytes, 50)
+        XCTAssertFalse(exact.estimated)
+        let guessed = DownloadOffers.estimate(exact: 0, bitrateKbps: 1000, duration: 8)
+        XCTAssertEqual(guessed.bytes, 1_000_000)
+        XCTAssertTrue(guessed.estimated)
+        let unknown = DownloadOffers.estimate(exact: 0, bitrateKbps: 0, duration: nil)
+        XCTAssertEqual(unknown.bytes, 0)
+        XCTAssertTrue(unknown.estimated)
+    }
+
+    func testPlaylistByteSumReplacesAnEstimate() throws {
+        let playlist = try fixture("media-playlist.m3u8")
+        let summed = DownloadOffers.summedRangeBytes(playlist)
+        XCTAssertEqual(summed, 295_912 + 298_168 + 290_460)
+        let seed = DownloadChoice(
+            id: "video-360-mp4", title: "360p", detail: "MP4", height: 360, audioOnly: false,
+            container: "mp4", kind: "tar", url: "https://example.invalid/a", bitrate: 680,
+            bytes: 1, estimated: true
+        )
+        let applied = DownloadOffers.applyingPlaylistBytes(seed, playlistBytes: summed)
+        XCTAssertEqual(applied.bytes, summed)
+        XCTAssertFalse(applied.estimated)
+        XCTAssertEqual(DownloadOffers.applyingPlaylistBytes(seed, playlistBytes: 0).estimated, true)
+    }
+
+    func testSavedLibraryWithoutRequestStillDecodes() throws {
+        let json = """
+        {"id":"1","permalink":"v1","title":"T","watchURL":"https://rumble.com/v1","disposition":"downloadable","status":"paused","progress":0.25,"bytesWritten":10,"bytesExpected":40,"attemptCount":0,"segmentTotal":4,"segmentDone":1,"updatedAt":"2026-11-11T00:00:00Z"}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(VideoRecord.self, from: Data(json.utf8))
+        XCTAssertEqual(record.status, .paused)
+        XCTAssertNil(record.request)
+        XCTAssertEqual(record.bytesPerSecond, 0)
+        XCTAssertEqual(record.segmentDone, 1)
+    }
+
     private func fixture(_ name: String) throws -> String {
         let url = try XCTUnwrap(Bundle(for: ArchiveTests.self).url(forResource: (name as NSString).deletingPathExtension, withExtension: (name as NSString).pathExtension))
         return try String(contentsOf: url, encoding: .utf8)

@@ -28,10 +28,35 @@ enum DownloadStatus: String, Codable {
     case queued
     case waitingForWiFi
     case downloading
+    case paused
     case downloaded
     case failed
     case waiting
     case skipped
+
+    var label: String {
+        switch self {
+        case .catalogued: return "Not downloaded"
+        case .queued: return "Queued"
+        case .waitingForWiFi: return "Waiting for Wi-Fi"
+        case .downloading: return "Downloading"
+        case .paused: return "Paused"
+        case .downloaded: return "Saved"
+        case .failed: return "Failed"
+        case .waiting: return "Waiting"
+        case .skipped: return "Skipped"
+        }
+    }
+}
+
+struct DownloadRequest: Codable, Equatable {
+    var url: String
+    var kind: String
+    var height: Int
+    var audioOnly: Bool
+    var container: String
+    var bytes: Int64
+    var label: String
 }
 
 struct VideoRecord: Codable, Identifiable, Equatable {
@@ -57,6 +82,98 @@ struct VideoRecord: Codable, Identifiable, Equatable {
     var segmentTotal: Int
     var segmentDone: Int
     var updatedAt: Date
+    var request: DownloadRequest? = nil
+    var bytesPerSecond: Double = 0
+
+    enum CodingKeys: String, CodingKey {
+        case id, permalink, title, watchURL, thumbnailURL, published, duration, views, channelName
+        case disposition, status, progress, bytesWritten, bytesExpected, relativePath, qualityLabel
+        case errorMessage, attemptCount, nextRetryAt, segmentTotal, segmentDone, updatedAt
+        case request, bytesPerSecond
+    }
+
+    init(id: String, permalink: String, title: String, watchURL: String, thumbnailURL: String?, published: Date?, duration: Double?, views: Int?, channelName: String?, disposition: Disposition, status: DownloadStatus, progress: Double, bytesWritten: Int64, bytesExpected: Int64, relativePath: String?, qualityLabel: String?, errorMessage: String?, attemptCount: Int, nextRetryAt: Date?, segmentTotal: Int, segmentDone: Int, updatedAt: Date, request: DownloadRequest? = nil, bytesPerSecond: Double = 0) {
+        self.id = id
+        self.permalink = permalink
+        self.title = title
+        self.watchURL = watchURL
+        self.thumbnailURL = thumbnailURL
+        self.published = published
+        self.duration = duration
+        self.views = views
+        self.channelName = channelName
+        self.disposition = disposition
+        self.status = status
+        self.progress = progress
+        self.bytesWritten = bytesWritten
+        self.bytesExpected = bytesExpected
+        self.relativePath = relativePath
+        self.qualityLabel = qualityLabel
+        self.errorMessage = errorMessage
+        self.attemptCount = attemptCount
+        self.nextRetryAt = nextRetryAt
+        self.segmentTotal = segmentTotal
+        self.segmentDone = segmentDone
+        self.updatedAt = updatedAt
+        self.request = request
+        self.bytesPerSecond = bytesPerSecond
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        permalink = try container.decode(String.self, forKey: .permalink)
+        title = try container.decode(String.self, forKey: .title)
+        watchURL = try container.decode(String.self, forKey: .watchURL)
+        thumbnailURL = try container.decodeIfPresent(String.self, forKey: .thumbnailURL)
+        published = try container.decodeIfPresent(Date.self, forKey: .published)
+        duration = try container.decodeIfPresent(Double.self, forKey: .duration)
+        views = try container.decodeIfPresent(Int.self, forKey: .views)
+        channelName = try container.decodeIfPresent(String.self, forKey: .channelName)
+        disposition = try container.decode(Disposition.self, forKey: .disposition)
+        status = try container.decode(DownloadStatus.self, forKey: .status)
+        progress = try container.decode(Double.self, forKey: .progress)
+        bytesWritten = try container.decode(Int64.self, forKey: .bytesWritten)
+        bytesExpected = try container.decode(Int64.self, forKey: .bytesExpected)
+        relativePath = try container.decodeIfPresent(String.self, forKey: .relativePath)
+        qualityLabel = try container.decodeIfPresent(String.self, forKey: .qualityLabel)
+        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+        attemptCount = try container.decode(Int.self, forKey: .attemptCount)
+        nextRetryAt = try container.decodeIfPresent(Date.self, forKey: .nextRetryAt)
+        segmentTotal = try container.decode(Int.self, forKey: .segmentTotal)
+        segmentDone = try container.decode(Int.self, forKey: .segmentDone)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        request = try container.decodeIfPresent(DownloadRequest.self, forKey: .request)
+        bytesPerSecond = try container.decodeIfPresent(Double.self, forKey: .bytesPerSecond) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(permalink, forKey: .permalink)
+        try container.encode(title, forKey: .title)
+        try container.encode(watchURL, forKey: .watchURL)
+        try container.encodeIfPresent(thumbnailURL, forKey: .thumbnailURL)
+        try container.encodeIfPresent(published, forKey: .published)
+        try container.encodeIfPresent(duration, forKey: .duration)
+        try container.encodeIfPresent(views, forKey: .views)
+        try container.encodeIfPresent(channelName, forKey: .channelName)
+        try container.encode(disposition, forKey: .disposition)
+        try container.encode(status, forKey: .status)
+        try container.encode(progress, forKey: .progress)
+        try container.encode(bytesWritten, forKey: .bytesWritten)
+        try container.encode(bytesExpected, forKey: .bytesExpected)
+        try container.encodeIfPresent(relativePath, forKey: .relativePath)
+        try container.encodeIfPresent(qualityLabel, forKey: .qualityLabel)
+        try container.encodeIfPresent(errorMessage, forKey: .errorMessage)
+        try container.encode(attemptCount, forKey: .attemptCount)
+        try container.encodeIfPresent(nextRetryAt, forKey: .nextRetryAt)
+        try container.encode(segmentTotal, forKey: .segmentTotal)
+        try container.encode(segmentDone, forKey: .segmentDone)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(request, forKey: .request)
+        try container.encode(bytesPerSecond, forKey: .bytesPerSecond)
+    }
 }
 
 struct LogEntry: Codable, Identifiable, Equatable {

@@ -27,7 +27,8 @@ The page also links pages 2, 3, 4, and 48 (25 videos per page).
 
 - On launch, on pull-to-refresh, and from a background refresh, it reads the Videos tab and remembers every video it sees.
 - The first successful sync is a **baseline**. Videos already on the channel are listed and are not downloaded. Later syncs walk forward until a page is entirely videos already seen, and queue every new public video in that span (so a burst that spills past page 1 is not missed). This is so the first launch does not try to save a thousand multi-gigabyte files. Hiding a video remembers its id, so restoring it does not immediately download it again.
-- You can download any listed video yourself, or tap **Download newest 5 / 10**. Settings has “on first sync, also download newest N”.
+- Tap a video to choose a rendition. Every published height is listed, with an MP4 and, for the segmented streams Rumble actually serves, an MPEG-TS copy. Audio only saves the AAC track as M4A. Each row shows the file size from the embed when Rumble publishes one, otherwise a `~` estimate from bitrate and duration (or from the playlist’s byte ranges / a HEAD request). A video that is already saved stays listed, with Play and Delete, and you can download a different variant beside it. Automatic downloads still use the quality chosen in Settings, not this sheet.
+- The **Downloads** tab lists queued, active, paused, waiting, failed, and finished items, with progress, speed, and time remaining while bytes are moving. Pause and Resume are per item, and Pause all / Resume all cover the list. Pause survives a relaunch: a single file keeps URLSession resume data, and a segmented download keeps the pieces it already wrote and continues at the next missing piece. Stop cancels the transfer and deletes the partial. The tab badge counts items that are downloading or queued. Settings stays in the Videos toolbar.
 - Files are written to the app’s Documents folder (`On My iPhone → Fuentes Archive → Videos`) because `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace` are set. They show up in the Files app.
 - Optional: also copy a finished file into Photos. Off by default.
 - Search, sort, filters, per-video delete, hide, storage totals, and a refresh log.
@@ -93,7 +94,7 @@ The player `ua` map has several kinds of URL:
 
 “Best” picks the highest real rendition. A cap such as 720p picks the highest rendition at or below that height. The Alex Jones video exposes 240/360, 480, 720, and 1080. Best selects the 1080p tar, not the timeline MP4.
 
-Downloads use a background `URLSession`, so a transfer keeps going after you leave the app. Progressive files keep resume data. HLS downloads keep a manifest and the pieces already written, and continue at the first missing piece. A failed piece is retried up to five times (30s, 2m, 10m, 30m, 2h). HTTP 404, 410, and 451 are not retried. Other people’s videos and members-only items are not retried forever.
+Downloads use a background `URLSession`, so a transfer keeps going after you leave the app. A user pause is stored as its own status and is not resumed by Wi-Fi, launch, or a retry. Progressive files keep resume data from `cancel(byProducingResumeData:)`. Segmented downloads keep a manifest, the output type (MP4, MPEG-TS, or audio-only M4A), and the pieces already written, and continue at the first missing piece. A failed piece is retried up to five times (30s, 2m, 10m, 30m, 2h). HTTP 404, 410, and 451 are not retried. Other people’s videos and members-only items are not retried forever.
 
 If the phone does not have room for the estimated size plus 64 MB, the download fails with a clear error instead of filling the disk.
 

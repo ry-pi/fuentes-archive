@@ -7,7 +7,7 @@ enum DownloadEvent {
     case progress(Double, Int64, Int64, Int, Int)
     case finished(URL, String)
     case failed(String, Int?)
-    case paused
+    case paused(user: Bool)
 }
 
 final class DownloadManager: NSObject, URLSessionDownloadDelegate {
@@ -25,6 +25,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
     private var backgroundCompletion: (() -> Void)?
     private var sessionEventsFinished = false
     private var minimumGeneration: [String: Int] = [:]
+    private var pausedIDs: Set<String> = []
     private let assembly = DispatchQueue(label: "archive.assembly", qos: .utility)
 
     private struct Job {
@@ -40,6 +41,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         var allowCellular: Bool
         var generation: Int
         var busy: Set<Int>
+        var audioOnly: Bool
     }
 
     private struct TaskNote: Codable {
@@ -52,6 +54,32 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         var urls: [String]
         var ext: String
         var quality: String
+        var audioOnly: Bool
+
+        enum CodingKeys: String, CodingKey { case urls, ext, quality, audioOnly }
+
+        init(urls: [String], ext: String, quality: String, audioOnly: Bool) {
+            self.urls = urls
+            self.ext = ext
+            self.quality = quality
+            self.audioOnly = audioOnly
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            urls = try container.decode([String].self, forKey: .urls)
+            ext = try container.decode(String.self, forKey: .ext)
+            quality = try container.decode(String.self, forKey: .quality)
+            audioOnly = try container.decodeIfPresent(Bool.self, forKey: .audioOnly) ?? false
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(urls, forKey: .urls)
+            try container.encode(ext, forKey: .ext)
+            try container.encode(quality, forKey: .quality)
+            try container.encode(audioOnly, forKey: .audioOnly)
+        }
     }
 
     func reconnect() {
@@ -97,15 +125,17 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         }
     }
 
-    func begin(videoID: String, title: String, variant: Variant, capHeight: Int?, allowCellular: Bool) {
+    func begin(videoID: String, title: String, variant: Variant, capHeight: Int?, allowCellular: Bool, audioOnly: Bool = false, container: String = "mp4") {
         reconnect()
+        guard !pausedIDs.contains(videoID) else { return }
         lock.lock()
         let generation = (jobs[videoID]?.generation ?? minimumGeneration[videoID] ?? 0) + 1
         minimumGeneration[videoID] = generation
         jobs[videoID] = nil
         lock.unlock()
-        let quality = "\(variant.height)p \(variant.kind.uppercased())"
-        if variant.kind == "mp4" || variant.kind == "webm" {
+        let quality = audioOnly ? "Audio only" : "\(variant.height)p \(container.uppercased())"
+        let segmented = variant.kind == "tar" || variant.kind == "hls" || variant.url.contains(".m3u8") || variant.url.contains(".tar")
+        if !segmented {
             guard let url = URL(string: variant.url) else {
                 emit(videoID, .failed("The stream URL was invalid.", nil))
                 return
@@ -114,9 +144,14 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 emit(videoID, .failed(RumbleError.diskSpace.localizedDescription, nil))
                 return
             }
-            let ext = variant.kind == "webm" ? "webm" : "mp4"
+            let ext = audioOnly ? "m4a" : (variant.kind == "webm" ? "webm" : "mp4")
+            let folder = LibraryStore.shared.partialURL(videoID)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let manifest = Manifest(urls: [url.absoluteString], ext: ext, quality: quality, audioOnly: audioOnly)
+            try? JSONEncoder().encode(manifest).write(to: folder.appendingPathComponent("manifest.json"), options: .atomic)
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent("resume.data"))
             lock.lock()
-            jobs[videoID] = Job(segments: [], ext: ext, quality: quality, nextIndex: 0, inFlight: 1, retries: [:], retryIndexes: [], singleFile: true, failed: false, allowCellular: allowCellular, generation: generation, busy: [])
+            jobs[videoID] = Job(segments: [], ext: ext, quality: quality, nextIndex: 0, inFlight: 1, retries: [:], retryIndexes: [], singleFile: true, failed: false, allowCellular: allowCellular, generation: generation, busy: [], audioOnly: audioOnly)
             lock.unlock()
             startFile(videoID: videoID, url: url, allowCellular: allowCellular, generation: generation)
             return
@@ -144,54 +179,91 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 var urls = playlist.segments.map(\.url)
                 if let map = playlist.mapURL { urls.insert(map, at: 0) }
-                let manifest = Manifest(urls: urls.map(\.absoluteString), ext: "mp4", quality: quality)
+                let outputExt = audioOnly ? "m4a" : (container == "ts" ? "ts" : "mp4")
+                let manifest = Manifest(urls: urls.map(\.absoluteString), ext: outputExt, quality: quality, audioOnly: audioOnly)
                 try JSONEncoder().encode(manifest).write(to: folder.appendingPathComponent("manifest.json"), options: .atomic)
-                guard self.isCurrent(videoID, generation) else { return }
-                self.enqueueSegments(videoID: videoID, urls: urls, ext: "mp4", quality: quality, allowCellular: allowCellular, generation: generation, alreadyRunning: [])
+                guard self.isCurrent(videoID, generation), !self.pausedIDs.contains(videoID) else { return }
+                self.enqueueSegments(videoID: videoID, urls: urls, ext: outputExt, quality: quality, allowCellular: allowCellular, generation: generation, alreadyRunning: [], audioOnly: audioOnly)
             } catch {
                 self.emit(videoID, .failed(error.localizedDescription, (error as? RumbleError).flatMap(Self.statusCode)))
             }
         }
     }
 
+    func allowStart(_ videoID: String) {
+        pausedIDs.remove(videoID)
+    }
+
     @discardableResult
     func resume(videoID: String, allowCellular: Bool, adopted: [LiveTask] = []) -> Bool {
         reconnect()
         let folder = LibraryStore.shared.partialURL(videoID)
-        if let data = try? Data(contentsOf: folder.appendingPathComponent("manifest.json")),
-           let manifest = try? JSONDecoder().decode(Manifest.self, from: data) {
-            let urls = manifest.urls.compactMap(URL.init(string:))
-            guard !urls.isEmpty else { return false }
-            let generation = adopted.map(\.generation).max() ?? 1
-            let busy = Set(adopted.compactMap(\.index))
-            enqueueSegments(videoID: videoID, urls: urls, ext: manifest.ext, quality: manifest.quality, allowCellular: allowCellular, generation: generation, alreadyRunning: busy)
-            return true
-        }
+        let manifest = (try? Data(contentsOf: folder.appendingPathComponent("manifest.json"))).flatMap { try? JSONDecoder().decode(Manifest.self, from: $0) }
         if let data = try? Data(contentsOf: folder.appendingPathComponent("resume.data")) {
+            let ext = manifest?.ext ?? "mp4"
+            let quality = manifest?.quality ?? "video"
+            let audioOnly = manifest?.audioOnly ?? false
+            pausedIDs.remove(videoID)
             lock.lock()
-            jobs[videoID] = Job(segments: [], ext: "mp4", quality: "video", nextIndex: 0, inFlight: 1, retries: [:], retryIndexes: [], singleFile: true, failed: false, allowCellular: allowCellular, generation: 1, busy: [])
+            jobs[videoID] = Job(segments: [], ext: ext, quality: quality, nextIndex: 0, inFlight: 1, retries: [:], retryIndexes: [], singleFile: true, failed: false, allowCellular: allowCellular, generation: 1, busy: [], audioOnly: audioOnly)
             lock.unlock()
             let task = session.downloadTask(withResumeData: data)
             remember(task, TaskNote(videoID: videoID, index: nil, generation: 1))
             task.resume()
             return true
         }
+        if let manifest {
+            let urls = manifest.urls.compactMap(URL.init(string:))
+            guard !urls.isEmpty else { return false }
+            let generation = adopted.map(\.generation).max() ?? 1
+            let busy = Set(adopted.compactMap(\.index))
+            pausedIDs.remove(videoID)
+            enqueueSegments(videoID: videoID, urls: urls, ext: manifest.ext, quality: manifest.quality, allowCellular: allowCellular, generation: generation, alreadyRunning: busy, audioOnly: manifest.audioOnly)
+            return true
+        }
         return false
     }
 
-    func pause(videoID: String) {
+    func pause(videoID: String, user: Bool) {
         reconnect()
+        pausedIDs.insert(videoID)
         lock.lock()
         jobs[videoID]?.failed = true
         let generation = jobs[videoID]?.generation ?? -1
         lock.unlock()
         session.getAllTasks { tasks in
-            for task in tasks {
-                guard let note = self.note(for: task), note.videoID == videoID, note.generation == generation else { continue }
-                task.cancel()
+            let mine = tasks.filter { task in
+                guard let note = self.note(for: task) else { return false }
+                return note.videoID == videoID && note.generation == generation
+            }
+            if mine.isEmpty {
+                self.emit(videoID, .paused(user: user))
+                return
+            }
+            let group = DispatchGroup()
+            for task in mine {
+                guard let download = task as? URLSessionDownloadTask else {
+                    task.cancel()
+                    continue
+                }
+                if self.note(for: download)?.index == nil {
+                    group.enter()
+                    download.cancel(byProducingResumeData: { data in
+                        if let data {
+                            let url = LibraryStore.shared.partialURL(videoID).appendingPathComponent("resume.data")
+                            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                            try? data.write(to: url, options: .atomic)
+                        }
+                        group.leave()
+                    })
+                } else {
+                    download.cancel()
+                }
+            }
+            group.notify(queue: .main) {
+                self.emit(videoID, .paused(user: user))
             }
         }
-        emit(videoID, .paused)
     }
 
     func cancel(videoID: String) {
@@ -267,15 +339,15 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         DispatchQueue.main.async { handler?() }
     }
 
-    private func enqueueSegments(videoID: String, urls: [URL], ext: String, quality: String, allowCellular: Bool, generation: Int, alreadyRunning: Set<Int>) {
-        guard isCurrent(videoID, generation) else { return }
+    private func enqueueSegments(videoID: String, urls: [URL], ext: String, quality: String, allowCellular: Bool, generation: Int, alreadyRunning: Set<Int>, audioOnly: Bool) {
+        guard isCurrent(videoID, generation), !pausedIDs.contains(videoID) else { return }
         var next = 0
         let folder = LibraryStore.shared.partialURL(videoID)
         while next < urls.count && (alreadyRunning.contains(next) || FileManager.default.fileExists(atPath: folder.appendingPathComponent(String(format: "seg-%05d.part", next)).path)) {
             next += 1
         }
         lock.lock()
-        jobs[videoID] = Job(segments: urls, ext: ext, quality: quality, nextIndex: next, inFlight: alreadyRunning.count, retries: [:], retryIndexes: [], singleFile: false, failed: false, allowCellular: allowCellular, generation: generation, busy: alreadyRunning)
+        jobs[videoID] = Job(segments: urls, ext: ext, quality: quality, nextIndex: next, inFlight: alreadyRunning.count, retries: [:], retryIndexes: [], singleFile: false, failed: false, allowCellular: allowCellular, generation: generation, busy: alreadyRunning, audioOnly: audioOnly)
         lock.unlock()
         if next >= urls.count {
             assemble(videoID: videoID)
@@ -376,18 +448,33 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 return
             }
             let title = LibraryStore.shared.snapshot().videos[videoID]?.title ?? "video"
-            let mp4 = Paths.videoFile(title: title, id: videoID, ext: "mp4")
+            let ext = snapshot.audioOnly ? "m4a" : snapshot.ext
+            let destination = Paths.videoFile(title: title, id: videoID, ext: ext)
+            if ext == "ts" {
+                do {
+                    try self.concatenate(pieces, to: destination)
+                    try? FileManager.default.removeItem(at: folder)
+                    self.emit(videoID, .finished(destination, snapshot.quality))
+                } catch {
+                    self.emit(videoID, .failed("Could not assemble the video file.", nil))
+                }
+                return
+            }
             do {
-                _ = try TSRemuxer.remux(files: pieces, to: mp4)
+                _ = try TSRemuxer.remux(files: pieces, to: destination, audioOnly: snapshot.audioOnly)
                 try? FileManager.default.removeItem(at: folder)
-                self.emit(videoID, .finished(mp4, snapshot.quality))
+                self.emit(videoID, .finished(destination, snapshot.quality))
             } catch {
-                try? FileManager.default.removeItem(at: mp4)
+                try? FileManager.default.removeItem(at: destination)
+                guard !snapshot.audioOnly else {
+                    self.emit(videoID, .failed("Could not save the audio track.", nil))
+                    return
+                }
                 let ts = Paths.videoFile(title: title, id: videoID, ext: "ts")
                 do {
                     try self.concatenate(pieces, to: ts)
                     try? FileManager.default.removeItem(at: folder)
-                    self.emit(videoID, .finished(ts, snapshot.quality + " (TS)"))
+                    self.emit(videoID, .finished(ts, snapshot.quality + " · MPEG-TS"))
                 } catch {
                     self.emit(videoID, .failed("Could not assemble the video file.", nil))
                 }
@@ -432,7 +519,12 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             if FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.removeItem(at: destination)
             }
-            try FileManager.default.moveItem(at: temp, to: destination)
+            if jobsLocked(videoID)?.audioOnly == true {
+                _ = try TSRemuxer.packageADTS(file: temp, to: destination)
+                try? FileManager.default.removeItem(at: temp)
+            } else {
+                try FileManager.default.moveItem(at: temp, to: destination)
+            }
             try? FileManager.default.removeItem(at: LibraryStore.shared.partialURL(videoID))
             lock.lock()
             jobs[videoID] = nil

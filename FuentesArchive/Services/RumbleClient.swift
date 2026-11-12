@@ -39,13 +39,31 @@ struct RumbleClient {
     }
 
     /// Listing `eid` values are not embed ids. oEmbed returns the real `/embed/{id}`.
+    func variants(for watch: URL) async throws -> [Variant] {
+        try await loadVariants(watch: watch)
+    }
+
     func resolve(watch: URL, capHeight: Int?) async throws -> Variant {
         var components = URLComponents(string: "https://rumble.com/api/Media/oembed.json")!
         components.queryItems = [URLQueryItem(name: "url", value: watch.absoluteString)]
         guard let oembedURL = components.url else { throw RumbleError.noStream }
         let payload = try await jsonObject(oembedURL)
         guard let embed = StreamResolver.embedID(fromOEmbed: payload) else { throw RumbleError.noStream }
+        let variants = try await variants(embedID: embed)
+        guard let chosen = StreamResolver.select(variants, capHeight: capHeight) else { throw RumbleError.noStream }
+        return chosen
+    }
 
+    private func loadVariants(watch: URL) async throws -> [Variant] {
+        var components = URLComponents(string: "https://rumble.com/api/Media/oembed.json")!
+        components.queryItems = [URLQueryItem(name: "url", value: watch.absoluteString)]
+        guard let oembedURL = components.url else { throw RumbleError.noStream }
+        let payload = try await jsonObject(oembedURL)
+        guard let embed = StreamResolver.embedID(fromOEmbed: payload) else { throw RumbleError.noStream }
+        return try await variants(embedID: embed)
+    }
+
+    private func variants(embedID embed: String) async throws -> [Variant] {
         var player: [String: Any]?
         if let endpoint = URL(string: "https://rumble.com/embedJS/u3/?request=video&ver=2&v=\(embed)") {
             let data = try? await fetch(endpoint, accept: "application/json")
@@ -59,8 +77,10 @@ struct RumbleClient {
             player = StreamResolver.playerObject(from: html)
         }
         guard let player else { throw RumbleError.noStream }
-        let chosen = StreamResolver.select(StreamResolver.variants(from: player), capHeight: capHeight)
-        if let chosen { return chosen }
+        let found = StreamResolver.variants(from: player)
+        if StreamResolver.select(found, capHeight: nil) != nil || found.contains(where: { $0.audioOnly && !$0.url.isEmpty }) {
+            return found
+        }
         let message = ((player["sys"] as? [String: Any])?["msg"] as? String)?.lowercased() ?? ""
         if message.contains("subscriber") || message.contains("premium") || message.contains("members") {
             throw RumbleError.members
@@ -70,6 +90,20 @@ struct RumbleClient {
 
     func text(_ url: URL) async throws -> String {
         String(decoding: try await fetch(url, accept: "*/*"), as: UTF8.self)
+    }
+
+    func contentLength(_ url: URL) async -> Int64? {
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = "HEAD"
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("https://rumble.com/", forHTTPHeaderField: "Referer")
+        guard let (_, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return nil }
+        if let header = http.value(forHTTPHeaderField: "Content-Length"), let value = Int64(header), value > 0 {
+            return value
+        }
+        return http.expectedContentLength > 0 ? http.expectedContentLength : nil
     }
 
     private func jsonObject(_ url: URL) async throws -> [String: Any] {

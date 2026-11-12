@@ -90,6 +90,10 @@ enum StreamResolver {
         return pool.max { rank($0) < rank($1) }
     }
 
+    static func videoCandidates(_ variants: [Variant]) -> [Variant] {
+        variants.filter { !$0.timeline && !$0.audioOnly && $0.height > 0 && !$0.url.isEmpty }
+    }
+
     private static func heightValue(key: Any, meta: [String: Any]) -> Int {
         if let height = meta["h"] as? NSNumber, height.intValue > 0 { return height.intValue }
         if let key = key as? String, let height = Int(key), height > 0 { return height }
@@ -237,6 +241,127 @@ struct HLSPlaylist {
 
     private static func attrInt(_ name: String, _ line: String) -> Int {
         Int(attr(name, line) ?? "") ?? 0
+    }
+}
+
+struct ByteEstimate: Equatable {
+    var bytes: Int64
+    var estimated: Bool
+}
+
+struct DownloadChoice: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var detail: String
+    var height: Int
+    var audioOnly: Bool
+    var container: String
+    var kind: String
+    var url: String
+    var bitrate: Int
+    var bytes: Int64
+    var estimated: Bool
+
+    var sizeLabel: String {
+        if bytes <= 0 { return "Size unknown" }
+        let text = FormatBytes.string(bytes)
+        return estimated ? "~\(text)" : text
+    }
+}
+
+enum FormatBytes {
+    static func string(_ count: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: count)
+    }
+}
+
+enum DownloadOffers {
+    /// Exact embed sizes win. Otherwise bitrate (kbps) times duration, marked as an estimate.
+    static func estimate(exact: Int64, bitrateKbps: Int, duration: Double?) -> ByteEstimate {
+        if exact > 0 {
+            return ByteEstimate(bytes: exact, estimated: false)
+        }
+        guard bitrateKbps > 0, let duration, duration > 0 else {
+            return ByteEstimate(bytes: 0, estimated: true)
+        }
+        let bytes = Int64((Double(bitrateKbps) * 1000.0 / 8.0) * duration)
+        return ByteEstimate(bytes: max(0, bytes), estimated: true)
+    }
+
+    static func summedRangeBytes(_ playlist: String) -> Int64 {
+        var total: Int64 = 0
+        for raw in playlist.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+            let probe = line.contains("://") ? line : "https://example.com/" + line
+            guard let url = URL(string: probe), let bytes = HLSPlaylist.byteLength(of: url) else { continue }
+            total += bytes
+        }
+        return total
+    }
+
+    static func build(variants: [Variant], duration: Double?) -> [DownloadChoice] {
+        var bestByHeight: [Int: Variant] = [:]
+        for item in StreamResolver.videoCandidates(variants) {
+            if let existing = bestByHeight[item.height], existing.bitrate >= item.bitrate {
+                continue
+            }
+            bestByHeight[item.height] = item
+        }
+        var choices: [DownloadChoice] = []
+        for height in bestByHeight.keys.sorted() {
+            guard let item = bestByHeight[height] else { continue }
+            let estimate = estimate(exact: item.size, bitrateKbps: item.bitrate, duration: duration)
+            let segmented = item.kind == "tar" || item.kind == "hls"
+            choices.append(choice(item, height: height, container: "mp4", title: "\(height)p", detail: segmented ? "MP4" : item.kind.uppercased(), estimate: estimate))
+            if segmented {
+                choices.append(choice(item, height: height, container: "ts", title: "\(height)p", detail: "MPEG-TS", estimate: estimate))
+            }
+        }
+        let audios = variants.filter { $0.audioOnly && !$0.timeline && !$0.url.isEmpty }
+        if let audio = audios.max(by: { $0.bitrate < $1.bitrate }) {
+            let estimate = estimate(exact: audio.size, bitrateKbps: audio.bitrate, duration: duration)
+            choices.append(DownloadChoice(
+                id: "audio-m4a",
+                title: "Audio only",
+                detail: "AAC · M4A",
+                height: 0,
+                audioOnly: true,
+                container: "m4a",
+                kind: audio.kind,
+                url: audio.url,
+                bitrate: audio.bitrate,
+                bytes: estimate.bytes,
+                estimated: estimate.estimated
+            ))
+        }
+        return choices
+    }
+
+    static func applyingPlaylistBytes(_ choice: DownloadChoice, playlistBytes: Int64) -> DownloadChoice {
+        guard playlistBytes > 0 else { return choice }
+        var copy = choice
+        copy.bytes = playlistBytes
+        copy.estimated = false
+        return copy
+    }
+
+    private static func choice(_ item: Variant, height: Int, container: String, title: String, detail: String, estimate: ByteEstimate) -> DownloadChoice {
+        DownloadChoice(
+            id: "video-\(height)-\(container)",
+            title: title,
+            detail: detail,
+            height: height,
+            audioOnly: false,
+            container: container,
+            kind: item.kind,
+            url: item.url,
+            bitrate: item.bitrate,
+            bytes: estimate.bytes,
+            estimated: estimate.estimated
+        )
     }
 }
 
