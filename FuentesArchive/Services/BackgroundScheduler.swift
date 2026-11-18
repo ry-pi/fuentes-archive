@@ -130,8 +130,7 @@ private enum ContinuedRuntime {
 
     static func update(title: String, completed: Int64, total: Int64) {
         if task == nil && !submitted { submit(title: title) }
-        task?.title = title
-        task?.subtitle = "Fuentes Archive"
+        task?.updateTitle(title, subtitle: "Fuentes Archive")
         task?.progress.totalUnitCount = max(total, 1)
         task?.progress.completedUnitCount = min(max(completed, 0), max(total, 1))
     }
