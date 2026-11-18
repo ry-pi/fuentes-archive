@@ -131,7 +131,7 @@ enum LiveDownloadActivity {
             current = try Activity.request(
                 attributes: DownloadActivityAttributes(videoID: videoID),
                 content: content,
-                pushType: nil as Activity<DownloadActivityAttributes>.PushType?
+                pushType: nil
             )
             DebugLog.event("live activity started \(videoID)")
         } catch {
