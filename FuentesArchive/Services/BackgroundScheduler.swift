@@ -9,6 +9,7 @@ enum BackgroundScheduler {
 
     static func register() {
         DebugLog.event("background tasks registered")
+        ContinuedDownloads.register()
         BGTaskScheduler.shared.register(forTaskWithIdentifier: refreshID, using: nil) { task in
             guard let task = task as? BGAppRefreshTask else { return }
             handle(task, trigger: "background-refresh")
@@ -41,9 +42,14 @@ enum BackgroundScheduler {
         }
     }
 
+    private static func earliest() -> Date {
+        let minutes = max(15, LibraryStore.shared.snapshot().settings.checkIntervalMinutes)
+        return Date(timeIntervalSinceNow: TimeInterval(minutes * 60))
+    }
+
     private static func scheduleRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: refreshID)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        request.earliestBeginDate = earliest()
         do {
             try BGTaskScheduler.shared.submit(request)
             DebugLog.detail("scheduled background refresh")
@@ -56,7 +62,7 @@ enum BackgroundScheduler {
         let request = BGProcessingTaskRequest(identifier: processingID)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 30 * 60)
+        request.earliestBeginDate = earliest()
         do {
             try BGTaskScheduler.shared.submit(request)
             DebugLog.detail("scheduled background processing")
@@ -65,6 +71,96 @@ enum BackgroundScheduler {
         }
     }
 }
+
+enum ContinuedDownloads {
+    static let identifier = "com.local.fuentesarchive.continued"
+
+    static func register() {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            ContinuedRuntime.register()
+        }
+        #else
+        DebugLog.event("continued processing needs the iOS 26 SDK; background URLSession and refresh stay in use")
+        #endif
+    }
+
+    static func update(title: String, completed: Int64, total: Int64) {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            ContinuedRuntime.update(title: title, completed: completed, total: total)
+        }
+        #endif
+    }
+
+    static func finish() {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            ContinuedRuntime.finish()
+        }
+        #endif
+    }
+}
+
+#if compiler(>=6.2)
+@available(iOS 26.0, *)
+private enum ContinuedRuntime {
+    static var task: BGContinuedProcessingTask?
+    static var submitted = false
+
+    static func register() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: ContinuedDownloads.identifier, using: nil) { incoming in
+            guard let continued = incoming as? BGContinuedProcessingTask else {
+                incoming.setTaskCompleted(success: false)
+                return
+            }
+            task = continued
+            continued.expirationHandler = {
+                DebugLog.event("continued processing expired")
+                continued.setTaskCompleted(success: false)
+                task = nil
+                submitted = false
+            }
+            DebugLog.event("continued processing started")
+            Task { @MainActor in
+                AppModel.shared.refreshContinuedProgress()
+            }
+        }
+    }
+
+    static func update(title: String, completed: Int64, total: Int64) {
+        if task == nil && !submitted { submit(title: title) }
+        task?.title = title
+        task?.subtitle = "Fuentes Archive"
+        task?.progress.totalUnitCount = max(total, 1)
+        task?.progress.completedUnitCount = min(max(completed, 0), max(total, 1))
+    }
+
+    static func finish() {
+        guard task != nil || submitted else { return }
+        task?.setTaskCompleted(success: true)
+        task = nil
+        submitted = false
+        DebugLog.event("continued processing finished")
+    }
+
+    private static func submit(title: String) {
+        let request = BGContinuedProcessingTaskRequest(
+            identifier: ContinuedDownloads.identifier,
+            title: title,
+            subtitle: "Fuentes Archive"
+        )
+        request.strategy = .queue
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            submitted = true
+            DebugLog.event("continued processing submitted \(title)")
+        } catch {
+            DebugLog.event("continued processing submit failed \(error.localizedDescription)")
+        }
+    }
+}
+#endif
 
 enum PhotosLibrary {
     static func addVideo(_ url: URL, completion: @escaping (Result<Void, Error>) -> Void) {

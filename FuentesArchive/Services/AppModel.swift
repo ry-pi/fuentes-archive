@@ -93,7 +93,8 @@ final class AppModel: ObservableObject {
 
     func syncIfStale() {
         let last = snapshot.lastSync ?? .distantPast
-        if Date().timeIntervalSince(last) < 90, snapshot.baselineReady { return }
+        let minutes = max(15, snapshot.settings.checkIntervalMinutes)
+        if Date().timeIntervalSince(last) < TimeInterval(minutes * 60), snapshot.baselineReady { return }
         sync(trigger: "launch")
     }
 
@@ -113,14 +114,19 @@ final class AppModel: ObservableObject {
         await performSync(trigger: trigger)
     }
 
-    func download(_ id: String, resetAttempts: Bool = false) {
+    func download(_ id: String, resetAttempts: Bool = false, automatic: Bool = false) {
         guard let record = snapshot.videos[id] else { return }
         guard record.disposition == .downloadable else { return }
+        let audioOnly = automatic && snapshot.settings.autoAudioOnly
         LibraryStore.shared.update { state in
             guard var record = state.videos[id] else { return }
             if resetAttempts { record.attemptCount = 0 }
             record.errorMessage = nil
-            record.request = nil
+            if audioOnly {
+                record.request = DownloadRequest(url: "", kind: "audio", height: 0, audioOnly: true, container: "m4a", bytes: 0, label: "Audio only")
+            } else {
+                record.request = nil
+            }
             record.status = .queued
             record.updatedAt = Date()
             state.videos[id] = record
@@ -177,6 +183,10 @@ final class AppModel: ObservableObject {
             guard var record = state.videos[id] else { return }
             record.playbackSeconds = seconds
             state.videos[id] = record
+        }
+        guard snapshot.settings.deleteWatched, let record = snapshot.videos[id], let duration = record.duration, duration > 30 else { return }
+        if seconds >= duration * 0.9 {
+            deleteFile(id)
         }
     }
 
@@ -280,17 +290,23 @@ final class AppModel: ObservableObject {
             record.updatedAt = Date()
             state.videos[id] = record
         }
+        noteContinued()
     }
 
-    func downloadNewest(_ count: Int) {
+    func downloadNewest(_ count: Int, automatic: Bool = false) {
         let ignored = Set(snapshot.ignoredIDs)
-        let ids = snapshot.videos.values
-            .filter { !ignored.contains($0.id) && $0.disposition == .downloadable && $0.status != .downloaded && $0.status != .downloading }
+        var records = snapshot.videos.values.filter {
+            !ignored.contains($0.id) && $0.disposition == .downloadable && $0.status != .downloaded && $0.status != .downloading
+        }
+        if automatic, let cutoff = snapshot.settings.autoNewerThan {
+            records = records.filter { ($0.published ?? .distantPast) >= cutoff }
+        }
+        let ids = records
             .sorted { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
             .prefix(count)
             .map(\.id)
-        ids.forEach { download($0, resetAttempts: true) }
-        log(source: "manual", message: "Queued \(ids.count) videos from the catalog.", level: "info")
+        ids.forEach { download($0, resetAttempts: true, automatic: automatic) }
+        log(source: automatic ? "auto" : "manual", message: "Queued \(ids.count) videos from the catalog.", level: "info")
     }
 
     func deleteFile(_ id: String) {
@@ -310,6 +326,7 @@ final class AppModel: ObservableObject {
             state.videos[id]?.errorMessage = nil
             state.videos[id]?.updatedAt = Date()
         }
+        noteContinued()
     }
 
     func hide(_ id: String) {
@@ -331,11 +348,13 @@ final class AppModel: ObservableObject {
 
     func updateSettings(_ body: (inout Settings) -> Void) {
         LibraryStore.shared.update { body(&$0.settings) }
+        BackgroundScheduler.scheduleAll()
         if snapshot.settings.wifiOnly && pathReady && !onWiFi {
             pauseForNetwork()
         } else {
             pump()
         }
+        enforceRetention()
     }
 
     func dismissIntro() {
@@ -401,6 +420,7 @@ final class AppModel: ObservableObject {
                 maxPages: pageLimit
             )
             let ignored = Set(snapshot.ignoredIDs)
+            var automaticIDs: [String] = []
             for item in pages.flatMap({ $0 }) where !ignored.contains(item.id) {
                 let previous = snapshot.videos[item.id]
                 upsert(item)
@@ -409,12 +429,13 @@ final class AppModel: ObservableObject {
                 }
                 if previous?.status == .waiting, item.disposition == .downloadable, !baseline, snapshot.settings.autoDownload,
                    !decision.queue.contains(item.id) {
-                    download(item.id)
+                    automaticIDs.append(item.id)
                 }
             }
             for id in decision.queue where !ignored.contains(id) {
-                download(id)
+                automaticIDs.append(id)
             }
+            queueAutomatic(automaticIDs)
             LibraryStore.shared.update { state in
                 if !state.baselineReady {
                     state.baselineReady = true
@@ -426,8 +447,9 @@ final class AppModel: ObservableObject {
                 state.lastError = nil
             }
             if baseline, snapshot.settings.backfillCount > 0 {
-                downloadNewest(snapshot.settings.backfillCount)
+                downloadNewest(snapshot.settings.backfillCount, automatic: true)
             }
+            enforceRetention()
             retryDue()
             log(source: trigger, message: "Sync finished.", level: "info")
             DebugLog.event("sync \(trigger) finished pages=\(pages.count) queued=\(decision.queue.count)")
@@ -494,6 +516,77 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func queueAutomatic(_ ids: [String]) {
+        guard snapshot.settings.autoDownload else { return }
+        var seen = Set<String>()
+        let unique = ids.filter { seen.insert($0).inserted }
+        let chosen = AutoPolicy.choose(
+            unique.map { AutoPolicy.Candidate(id: $0, published: snapshot.videos[$0]?.published) },
+            newerThan: snapshot.settings.autoNewerThan,
+            newestCount: snapshot.settings.autoNewestCount
+        )
+        for id in chosen {
+            let title = snapshot.videos[id]?.title ?? "New video"
+            download(id, automatic: true)
+            if snapshot.settings.notifyOnNew {
+                NotificationService.notify(title: "New download", body: title)
+            }
+        }
+    }
+
+    private func enforceRetention() {
+        let settings = snapshot.settings
+        let now = Date()
+        var remove: [String] = []
+        let saved = snapshot.videos.values.filter { $0.status == .downloaded && $0.relativePath != nil }
+        for record in saved {
+            let watched = record.duration.map { duration in duration > 30 && record.playbackSeconds >= duration * 0.9 } ?? false
+            if settings.deleteWatched && watched {
+                remove.append(record.id)
+                continue
+            }
+            if settings.deleteAfterDays > 0 {
+                let age = now.timeIntervalSince(record.updatedAt)
+                if age > Double(settings.deleteAfterDays) * 86_400 {
+                    remove.append(record.id)
+                }
+            }
+        }
+        for id in remove { deleteFile(id) }
+        guard settings.storageCapGB > 0 else { return }
+        let cap = Int64(settings.storageCapGB) * 1024 * 1024 * 1024
+        var used = DiskUsage.current().downloads
+        if used <= cap { return }
+        let oldest = snapshot.videos.values
+            .filter { $0.status == .downloaded && $0.relativePath != nil && !remove.contains($0.id) }
+            .sorted { $0.updatedAt < $1.updatedAt }
+        for record in oldest {
+            if used <= cap { break }
+            let size = record.relativePath.flatMap { path -> Int64? in
+                let url = LibraryStore.shared.fileURL(relativePath: path)
+                return DiskUsage.fileBytes(url)
+            } ?? record.bytesWritten
+            deleteFile(record.id)
+            used -= max(size, 0)
+        }
+    }
+
+    func refreshContinuedProgress() {
+        noteContinued()
+    }
+
+    private func noteContinued() {
+        let active = snapshot.videos.values.filter { $0.status == .downloading || $0.status == .queued }
+        if active.isEmpty {
+            ContinuedDownloads.finish()
+            return
+        }
+        let written = active.reduce(Int64(0)) { $0 + $1.bytesWritten }
+        let expected = active.reduce(Int64(0)) { $0 + max($1.bytesExpected, $1.bytesWritten) }
+        let title = active.count == 1 ? (active.first?.title ?? "Downloading") : "Downloading \(active.count) videos"
+        ContinuedDownloads.update(title: title, completed: written, total: max(expected, 1))
+    }
+
     private func pump() {
         guard pathReady else { return }
         let allow = !snapshot.settings.wifiOnly || onWiFi
@@ -502,9 +595,11 @@ final class AppModel: ObservableObject {
         }.sorted { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
         for record in candidates {
             let active = snapshot.videos.values.filter { $0.status == .downloading }.count
-            if active >= 2 { break }
+            let limit = min(4, max(1, snapshot.settings.maxConcurrent))
+            if active >= limit { break }
             start(record.id)
         }
+        noteContinued()
     }
 
     private func start(_ id: String) {
@@ -532,10 +627,19 @@ final class AppModel: ObservableObject {
                 let variant: Variant
                 let audioOnly: Bool
                 let container: String
-                if let request {
+                if let request, !request.url.isEmpty {
                     variant = Variant(kind: request.kind, height: request.height, bitrate: 0, size: request.bytes, url: request.url, timeline: false, audioOnly: request.audioOnly)
                     audioOnly = request.audioOnly
                     container = request.container
+                } else if request?.audioOnly == true {
+                    guard let watch = URL(string: record.watchURL) else { throw RumbleError.noStream }
+                    let variants = try await client.variants(for: watch)
+                    guard let audio = variants.filter({ $0.audioOnly && !$0.timeline && !$0.url.isEmpty }).max(by: { $0.bitrate < $1.bitrate }) else {
+                        throw RumbleError.noStream
+                    }
+                    variant = audio
+                    audioOnly = true
+                    container = "m4a"
                 } else {
                     guard let watch = URL(string: record.watchURL) else { throw RumbleError.noStream }
                     variant = try await client.resolve(watch: watch, capHeight: cap)
@@ -605,6 +709,7 @@ final class AppModel: ObservableObject {
                 let megabytes = (snapshot.videos[id]?.bytesPerSecond ?? 0) / (1024 * 1024)
                 DebugLog.detail(String(format: "progress %@ %.2f MB/s written %lld/%lld segments %d/%d", id, megabytes, written, expected, done, total))
             }
+            noteContinued()
         case let .finished(url, quality):
             let relative = "Videos/" + url.lastPathComponent
             LibraryStore.shared.update { state in
@@ -625,6 +730,8 @@ final class AppModel: ObservableObject {
             if snapshot.settings.notify {
                 NotificationService.notify(title: "Video saved", body: snapshot.videos[id]?.title ?? "Download finished")
             }
+            enforceRetention()
+            noteContinued()
             if snapshot.settings.saveToPhotos {
                 if url.pathExtension.lowercased() == "mp4" {
                     PhotosSaver.save(url) { result in
@@ -679,6 +786,7 @@ final class AppModel: ObservableObject {
         DebugLog.event("download error \(id) \(message)")
         scheduleRetries()
         pump()
+        noteContinued()
     }
 
     private func retryDue() {

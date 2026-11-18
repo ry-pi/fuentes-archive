@@ -6,6 +6,7 @@
 	<array>
 		<string>com.local.fuentesarchive.refresh</string>
 		<string>com.local.fuentesarchive.processing</string>
+		<string>com.local.fuentesarchive.continued</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>

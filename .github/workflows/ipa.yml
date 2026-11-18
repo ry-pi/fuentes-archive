@@ -42,6 +42,16 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          matches=(/Applications/Xcode_26*.app)
+          if [ ${#matches[@]} -gt 0 ]; then
+            selected="$(printf '%s\n' "${matches[@]}" | sort | tail -1)"
+            sudo xcode-select -s "$selected"
+          fi
+          xcodebuild -version
       - name: Select a simulator
         id: sim
         run: |

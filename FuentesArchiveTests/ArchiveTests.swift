@@ -267,6 +267,68 @@ final class ArchiveTests: XCTestCase {
         XCTAssertEqual(record.segmentDone, 1)
     }
 
+    func testAutoPolicyKeepsNewestAfterTheCutoff() {
+        let older = Date(timeIntervalSince1970: 1_700_000_000)
+        let mid = Date(timeIntervalSince1970: 1_730_000_000)
+        let newest = Date(timeIntervalSince1970: 1_760_000_000)
+        let items = [
+            AutoPolicy.Candidate(id: "old", published: older),
+            AutoPolicy.Candidate(id: "mid", published: mid),
+            AutoPolicy.Candidate(id: "new", published: newest),
+            AutoPolicy.Candidate(id: "undated", published: nil)
+        ]
+        XCTAssertEqual(
+            AutoPolicy.choose(items, newerThan: mid, newestCount: 0),
+            ["new", "mid"]
+        )
+        XCTAssertEqual(
+            AutoPolicy.choose(items, newerThan: nil, newestCount: 1),
+            ["new"]
+        )
+        XCTAssertEqual(
+            AutoPolicy.choose(items, newerThan: mid, newestCount: 1),
+            ["new"]
+        )
+    }
+
+    func testAbsoluteSyncTimeUsesLocalClockFormat() throws {
+        var parts = DateComponents()
+        parts.calendar = Calendar(identifier: .gregorian)
+        parts.timeZone = TimeZone(secondsFromGMT: 0)
+        parts.year = 2026
+        parts.month = 11
+        parts.day = 11
+        parts.hour = 20
+        parts.minute = 21
+        let date = try XCTUnwrap(parts.date)
+        let zone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        XCTAssertEqual(Format.absolute(date, timeZone: zone), "2026-11-11 8:21 PM")
+    }
+
+    func testNewAutoSettingsDefaultWhenMissing() throws {
+        let settings = try JSONDecoder().decode(Settings.self, from: Data("{}".utf8))
+        XCTAssertEqual(settings.checkIntervalMinutes, 15)
+        XCTAssertFalse(settings.autoAudioOnly)
+        XCTAssertNil(settings.autoNewerThan)
+        XCTAssertEqual(settings.autoNewestCount, 0)
+        XCTAssertEqual(settings.maxConcurrent, 2)
+        XCTAssertFalse(settings.deleteWatched)
+        XCTAssertEqual(settings.deleteAfterDays, 0)
+        XCTAssertEqual(settings.storageCapGB, 0)
+        XCTAssertTrue(settings.notifyOnNew)
+    }
+
+    func testAllocatedSizeReadsTheFileOnDisk() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("disk-usage-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("clip.bin")
+        let payload = Data(repeating: 7, count: 2048)
+        try payload.write(to: file)
+        let measured = DiskUsage.treeBytes(folder)
+        XCTAssertGreaterThanOrEqual(measured, 2048)
+        try? FileManager.default.removeItem(at: folder)
+    }
+
     private func fixture(_ name: String) throws -> String {
         let url = try XCTUnwrap(Bundle(for: ArchiveTests.self).url(forResource: (name as NSString).deletingPathExtension, withExtension: (name as NSString).pathExtension))
         return try String(contentsOf: url, encoding: .utf8)

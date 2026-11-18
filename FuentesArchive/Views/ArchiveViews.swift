@@ -47,6 +47,14 @@ enum Format {
         return "\(seconds)s left"
     }
 
+    static func absolute(_ date: Date, timeZone: TimeZone = .current, locale: Locale = Locale(identifier: "en_US_POSIX")) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd h:mm a"
+        return formatter.string(from: date)
+    }
+
     static func relative(_ date: Date?) -> String {
         guard let date else { return "" }
         let formatter = RelativeDateTimeFormatter()
@@ -222,7 +230,11 @@ struct LibraryView: View {
                 .font(.footnote)
                 .foregroundStyle(Theme.muted)
             if let last = model.snapshot.lastSync {
-                Text("Last sync \(Format.relative(last))")
+                Text("Last successful sync \(Format.absolute(last))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+            } else {
+                Text("No successful sync yet")
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
             }
@@ -463,21 +475,8 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("Downloads") {
-                Toggle("Auto-download new videos", isOn: binding(\.autoDownload))
-                Toggle("Wi-Fi only", isOn: binding(\.wifiOnly))
+                NavigationLink("Auto-Download") { AutoDownloadSettings() }
                 Toggle("Save a copy to Photos", isOn: binding(\.saveToPhotos))
-                Toggle("Notify when a download finishes", isOn: binding(\.notify))
-                Picker("Quality", selection: binding(\.quality)) {
-                    ForEach(Quality.allCases) { quality in
-                        Text(quality.label).tag(quality)
-                    }
-                }
-                Stepper(value: binding(\.maxPages), in: 1...10) {
-                    Text("Pages checked each sync: \(model.settings.maxPages)")
-                }
-                Stepper(value: binding(\.backfillCount), in: 0...25) {
-                    Text("On first sync, also download newest \(model.settings.backfillCount)")
-                }
             }
             Section("Library") {
                 LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
@@ -511,6 +510,105 @@ struct SettingsView: View {
                 ShareSheet(url: feedURL)
             }
         }
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<Settings, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.settings[keyPath: keyPath] },
+            set: { newValue in model.updateSettings { $0[keyPath: keyPath] = newValue } }
+        )
+    }
+}
+
+struct AutoDownloadSettings: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Auto-download new videos", isOn: binding(\.autoDownload))
+                Picker("Check every", selection: binding(\.checkIntervalMinutes)) {
+                    Text("15 minutes").tag(15)
+                    Text("30 minutes").tag(30)
+                    Text("1 hour").tag(60)
+                    Text("3 hours").tag(180)
+                    Text("6 hours").tag(360)
+                    Text("12 hours").tag(720)
+                }
+            } footer: {
+                Text("The interval is the earliest iOS may run a background check. It often waits longer.")
+            }
+            Section("What to save") {
+                Picker("Quality", selection: binding(\.quality)) {
+                    ForEach(Quality.allCases) { quality in
+                        Text(quality.label).tag(quality)
+                    }
+                }
+                Toggle("Audio only", isOn: binding(\.autoAudioOnly))
+                Toggle("Wi-Fi only", isOn: binding(\.wifiOnly))
+                Stepper(value: binding(\.maxPages), in: 1...10) {
+                    Text("Pages checked each sync: \(model.settings.maxPages)")
+                }
+                Stepper(value: binding(\.backfillCount), in: 0...25) {
+                    Text("On first sync, also download newest \(model.settings.backfillCount)")
+                }
+            }
+            Section("Which new videos") {
+                Toggle("Only videos after a date", isOn: dateEnabled)
+                if model.settings.autoNewerThan != nil {
+                    DatePicker(
+                        "Newer than",
+                        selection: dateValue,
+                        displayedComponents: .date
+                    )
+                }
+                Stepper(value: binding(\.autoNewestCount), in: 0...50) {
+                    Text(model.settings.autoNewestCount == 0 ? "No newest-N limit" : "Only the newest \(model.settings.autoNewestCount)")
+                }
+                Stepper(value: binding(\.maxConcurrent), in: 1...4) {
+                    Text("At once: \(model.settings.maxConcurrent)")
+                }
+            }
+            Section("Cleanup") {
+                Toggle("Delete after watching", isOn: binding(\.deleteWatched))
+                Stepper(value: binding(\.deleteAfterDays), in: 0...365) {
+                    Text(model.settings.deleteAfterDays == 0 ? "Do not delete by age" : "Delete files older than \(model.settings.deleteAfterDays) days")
+                }
+                Picker("Storage cap", selection: binding(\.storageCapGB)) {
+                    Text("Off").tag(0)
+                    Text("5 GB").tag(5)
+                    Text("10 GB").tag(10)
+                    Text("25 GB").tag(25)
+                    Text("50 GB").tag(50)
+                }
+            }
+            Section("Notifications") {
+                Toggle("When a new download starts", isOn: binding(\.notifyOnNew))
+                Toggle("When a download finishes", isOn: binding(\.notify))
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+        .navigationTitle("Auto-Download")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var dateEnabled: Binding<Bool> {
+        Binding(
+            get: { model.settings.autoNewerThan != nil },
+            set: { enabled in
+                model.updateSettings { settings in
+                    settings.autoNewerThan = enabled ? (settings.autoNewerThan ?? Date()) : nil
+                }
+            }
+        )
+    }
+
+    private var dateValue: Binding<Date> {
+        Binding(
+            get: { model.settings.autoNewerThan ?? Date() },
+            set: { value in model.updateSettings { $0.autoNewerThan = value } }
+        )
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<Settings, Value>) -> Binding<Value> {
@@ -788,8 +886,17 @@ struct DownloadOptionsSheet: View {
 
 struct DownloadsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var footprint = DiskFootprint(app: 0, downloads: 0, capacity: 0)
 
     private var rows: [VideoRecord] { model.downloadRows() }
+
+    private var savedSignature: String {
+        model.snapshot.videos.values
+            .filter { $0.status == .downloaded }
+            .compactMap(\.relativePath)
+            .sorted()
+            .joined(separator: "|")
+    }
 
     private var canPauseAll: Bool {
         rows.contains { item in
@@ -824,6 +931,13 @@ struct DownloadsView: View {
         .navigationTitle("Downloads")
         .scrollContentBackground(.hidden)
         .background(Theme.background)
+        .safeAreaInset(edge: .bottom) {
+            StorageBars(footprint: footprint)
+        }
+        .onAppear { footprint = DiskUsage.current() }
+        .onChange(of: savedSignature) { _, _ in
+            footprint = DiskUsage.current()
+        }
     }
 
     private var controls: some View {
@@ -833,6 +947,52 @@ struct DownloadsView: View {
             Spacer()
             Button("Resume all") { model.resumeAll() }
                 .disabled(!canResumeAll)
+        }
+    }
+}
+
+struct StorageBars: View {
+    var footprint: DiskFootprint
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            bar("App", bytes: footprint.app)
+            bar("Downloads", bytes: footprint.downloads)
+            Text("Total \(Format.bytes(footprint.app + footprint.downloads))")
+                .font(.caption)
+                .foregroundStyle(Theme.muted)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card)
+    }
+
+    private var scale: Double {
+        let used = Double(footprint.app + footprint.downloads)
+        let capacity = Double(footprint.capacity)
+        if capacity > used && capacity > 0 { return capacity }
+        return max(Double(max(footprint.app, footprint.downloads)), 1)
+    }
+
+    private func bar(_ title: String, bytes: Int64) -> some View {
+        let fraction = CGFloat(min(1, Double(bytes) / scale))
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(Format.bytes(bytes))
+            }
+            .font(.caption.weight(.semibold))
+            Capsule()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 8)
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(Theme.gold)
+                        .scaleEffect(x: bytes > 0 ? max(fraction, 0.02) : 0, anchor: .leading)
+                }
+                .clipShape(Capsule())
         }
     }
 }

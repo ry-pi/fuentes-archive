@@ -212,6 +212,29 @@ struct SyncVideo: Equatable {
     var disposition: Disposition
 }
 
+enum AutoPolicy {
+    struct Candidate: Equatable {
+        var id: String
+        var published: Date?
+    }
+
+    /// Newest first. A cutoff drops anything older or undated. newestCount 0 keeps every survivor.
+    static func choose(_ items: [Candidate], newerThan: Date?, newestCount: Int) -> [String] {
+        var kept = items
+        if let newerThan {
+            kept = kept.filter { item in
+                guard let published = item.published else { return false }
+                return published >= newerThan
+            }
+        }
+        kept.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
+        if newestCount > 0 {
+            kept = Array(kept.prefix(newestCount))
+        }
+        return kept.map(\.id)
+    }
+}
+
 enum AutoQueue {
     /// Walk pages until one is entirely videos we already know.
     /// Every new public video before that boundary is queued, including ones

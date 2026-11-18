@@ -204,9 +204,20 @@ struct Settings: Codable, Equatable {
     var backfillCount: Int = 0
     var dismissedIntro: Bool = false
     var verboseLog: Bool = false
+    var checkIntervalMinutes: Int = 15
+    var autoAudioOnly: Bool = false
+    var autoNewerThan: Date? = nil
+    var autoNewestCount: Int = 0
+    var maxConcurrent: Int = 2
+    var deleteWatched: Bool = false
+    var deleteAfterDays: Int = 0
+    var storageCapGB: Int = 0
+    var notifyOnNew: Bool = true
 
     enum CodingKeys: String, CodingKey {
         case autoDownload, wifiOnly, quality, saveToPhotos, notify, maxPages, backfillCount, dismissedIntro, verboseLog
+        case checkIntervalMinutes, autoAudioOnly, autoNewerThan, autoNewestCount, maxConcurrent
+        case deleteWatched, deleteAfterDays, storageCapGB, notifyOnNew
     }
 
     init() {}
@@ -222,6 +233,15 @@ struct Settings: Codable, Equatable {
         backfillCount = try container.decodeIfPresent(Int.self, forKey: .backfillCount) ?? 0
         dismissedIntro = try container.decodeIfPresent(Bool.self, forKey: .dismissedIntro) ?? false
         verboseLog = try container.decodeIfPresent(Bool.self, forKey: .verboseLog) ?? false
+        checkIntervalMinutes = try container.decodeIfPresent(Int.self, forKey: .checkIntervalMinutes) ?? 15
+        autoAudioOnly = try container.decodeIfPresent(Bool.self, forKey: .autoAudioOnly) ?? false
+        autoNewerThan = try container.decodeIfPresent(Date.self, forKey: .autoNewerThan)
+        autoNewestCount = try container.decodeIfPresent(Int.self, forKey: .autoNewestCount) ?? 0
+        maxConcurrent = try container.decodeIfPresent(Int.self, forKey: .maxConcurrent) ?? 2
+        deleteWatched = try container.decodeIfPresent(Bool.self, forKey: .deleteWatched) ?? false
+        deleteAfterDays = try container.decodeIfPresent(Int.self, forKey: .deleteAfterDays) ?? 0
+        storageCapGB = try container.decodeIfPresent(Int.self, forKey: .storageCapGB) ?? 0
+        notifyOnNew = try container.decodeIfPresent(Bool.self, forKey: .notifyOnNew) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -235,6 +255,15 @@ struct Settings: Codable, Equatable {
         try container.encode(backfillCount, forKey: .backfillCount)
         try container.encode(dismissedIntro, forKey: .dismissedIntro)
         try container.encode(verboseLog, forKey: .verboseLog)
+        try container.encode(checkIntervalMinutes, forKey: .checkIntervalMinutes)
+        try container.encode(autoAudioOnly, forKey: .autoAudioOnly)
+        try container.encodeIfPresent(autoNewerThan, forKey: .autoNewerThan)
+        try container.encode(autoNewestCount, forKey: .autoNewestCount)
+        try container.encode(maxConcurrent, forKey: .maxConcurrent)
+        try container.encode(deleteWatched, forKey: .deleteWatched)
+        try container.encode(deleteAfterDays, forKey: .deleteAfterDays)
+        try container.encode(storageCapGB, forKey: .storageCapGB)
+        try container.encode(notifyOnNew, forKey: .notifyOnNew)
     }
 }
 
@@ -366,5 +395,55 @@ enum Paths {
     static var videosDirectory: URL { documents.appendingPathComponent("Videos", isDirectory: true) }
     static func videoFile(title: String, id: String, ext: String) -> URL {
         videosDirectory.appendingPathComponent(FileNames.safe(title: title, id: id, ext: ext))
+    }
+}
+
+struct DiskFootprint: Equatable {
+    var app: Int64
+    var downloads: Int64
+    var capacity: Int64
+}
+
+enum DiskUsage {
+    static func current() -> DiskFootprint {
+        let files = FileManager.default
+        let bundle = treeBytes(Bundle.main.bundleURL)
+        let library = files.urls(for: .libraryDirectory, in: .userDomainMask).first
+        let caches = files.urls(for: .cachesDirectory, in: .userDomainMask).first
+        let cachesPath = caches?.standardizedFileURL.path
+        let libraryBytes = library.map { treeBytes($0, skipping: cachesPath.map { [$0] } ?? []) } ?? 0
+        let cacheBytes = caches.map { treeBytes($0) } ?? 0
+        let temporary = treeBytes(files.temporaryDirectory)
+        return DiskFootprint(
+            app: bundle + libraryBytes + cacheBytes + temporary,
+            downloads: treeBytes(Paths.videosDirectory),
+            capacity: volumeCapacity()
+        )
+    }
+
+    static func treeBytes(_ root: URL, skipping prefixes: [String] = []) -> Int64 {
+        let path = root.standardizedFileURL.path
+        if prefixes.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return 0 }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return 0 }
+        if !isDirectory.boolValue { return fileBytes(root) }
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .fileSizeKey]
+        ) else { return 0 }
+        return children.reduce(Int64(0)) { $0 + treeBytes($1, skipping: prefixes) }
+    }
+
+    static func fileBytes(_ url: URL) -> Int64 {
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .fileSizeKey])
+        if values?.isDirectory == true { return 0 }
+        if let allocated = values?.totalFileAllocatedSize { return Int64(allocated) }
+        if let allocated = values?.fileAllocatedSize { return Int64(allocated) }
+        return Int64(values?.fileSize ?? 0)
+    }
+
+    private static func volumeCapacity() -> Int64 {
+        let values = try? Paths.documents.resourceValues(forKeys: [.volumeTotalCapacityKey])
+        return Int64(values?.volumeTotalCapacity ?? 0)
     }
 }
