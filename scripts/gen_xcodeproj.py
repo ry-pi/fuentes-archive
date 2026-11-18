@@ -20,9 +20,17 @@ APP = [
     "FuentesArchive/Services/DownloadManager.swift",
     "FuentesArchive/Services/Playback.swift",
     "FuentesArchive/Services/RumbleClient.swift",
+    "FuentesArchive/Services/WidgetBridge.swift",
+    "FuentesArchive/Shared/ArchiveSnapshot.swift",
     "FuentesArchive/Views/ArchiveViews.swift",
     "FuentesArchive/Views/PlayerTab.swift",
 ]
+WIDGET = [
+    "FuentesArchiveWidgets/WidgetsBundle.swift",
+    "FuentesArchiveWidgets/ArchiveWidgets.swift",
+    "FuentesArchiveWidgets/DownloadActivity.swift",
+]
+SHARED = "FuentesArchive/Shared/ArchiveSnapshot.swift"
 APP_RESOURCES = [
     "FuentesArchive/Assets.xcassets",
     "FuentesArchive/PrivacyInfo.xcprivacy",
@@ -67,6 +75,23 @@ CFG_APP_DEBUG = uid("cfg-app-debug")
 CFG_APP_RELEASE = uid("cfg-app-release")
 CFG_TEST_DEBUG = uid("cfg-test-debug")
 CFG_TEST_RELEASE = uid("cfg-test-release")
+WIDGET_TARGET = uid("target-widget")
+WIDGET_PRODUCT = uid("product-widget")
+WIDGET_SOURCES_PHASE = uid("phase-sources-widget")
+WIDGET_FRAMEWORKS_PHASE = uid("phase-frameworks-widget")
+WIDGET_RESOURCES_PHASE = uid("phase-resources-widget")
+EMBED_PHASE = uid("phase-embed-widget")
+EMBED_FILE = uid("embed-widget-appex")
+WIDGET_PROXY = uid("proxy-widget")
+APP_WIDGET_DEPENDENCY = uid("dependency-widget")
+GROUP_WIDGET = uid("group-widget")
+CONFIG_LIST_WIDGET = uid("cfglist-widget")
+CFG_WIDGET_DEBUG = uid("cfg-widget-debug")
+CFG_WIDGET_RELEASE = uid("cfg-widget-release")
+
+
+def widget_build_file(path: str) -> str:
+    return uid("build-widget-" + path)
 
 
 def file_ref(path: str) -> str:
@@ -106,6 +131,9 @@ a("")
 a("/* Begin PBXBuildFile section */")
 for path in APP + APP_RESOURCES + TEST_SOURCES + TEST_RESOURCES:
     a(f"\t\t{build_file(path)} /* {Path(path).name} */ = {{isa = PBXBuildFile; fileRef = {file_ref(path)} /* {Path(path).name} */; }};")
+for path in [SHARED] + WIDGET:
+    a(f"\t\t{widget_build_file(path)} /* {Path(path).name} */ = {{isa = PBXBuildFile; fileRef = {file_ref(path)} /* {Path(path).name} */; }};")
+a(f"\t\t{EMBED_FILE} /* FuentesArchiveWidgets.appex in Embed Foundation Extensions */ = {{isa = PBXBuildFile; fileRef = {WIDGET_PRODUCT} /* FuentesArchiveWidgets.appex */; settings = {{ATTRIBUTES = (RemoveHeadersOnCopy, ); }}; }};")
 a("/* End PBXBuildFile section */")
 a("")
 a("/* Begin PBXContainerItemProxy section */")
@@ -116,19 +144,32 @@ a("\t\t\tproxyType = 1;")
 a(f"\t\t\tremoteGlobalIDString = {APP_TARGET};")
 a("\t\t\tremoteInfo = FuentesArchive;")
 a("\t\t};")
+a(f"\t\t{WIDGET_PROXY} /* PBXContainerItemProxy */ = {{")
+a("\t\t\tisa = PBXContainerItemProxy;")
+a(f"\t\t\tcontainerPortal = {PROJECT} /* Project object */;")
+a("\t\t\tproxyType = 1;")
+a(f"\t\t\tremoteGlobalIDString = {WIDGET_TARGET};")
+a("\t\t\tremoteInfo = FuentesArchiveWidgets;")
+a("\t\t};")
 a("/* End PBXContainerItemProxy section */")
 a("")
 a("/* Begin PBXFileReference section */")
 a(f"\t\t{APP_PRODUCT} /* FuentesArchive.app */ = {{isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FuentesArchive.app; sourceTree = BUILT_PRODUCTS_DIR; }};")
 a(f"\t\t{TEST_PRODUCT} /* FuentesArchiveTests.xctest */ = {{isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FuentesArchiveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; }};")
-for path in APP + APP_RESOURCES + TEST_SOURCES + TEST_RESOURCES:
+a(f"\t\t{WIDGET_PRODUCT} /* FuentesArchiveWidgets.appex */ = {{isa = PBXFileReference; explicitFileType = \"wrapper.app-extension\"; includeInIndex = 0; path = FuentesArchiveWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; }};")
+for path in APP + APP_RESOURCES + TEST_SOURCES + TEST_RESOURCES + WIDGET:
     name = Path(path).name
-    rel = str(Path(path).relative_to("FuentesArchive" if path.startswith("FuentesArchive/") else "FuentesArchiveTests"))
+    if path.startswith("FuentesArchiveWidgets/"):
+        rel = str(Path(path).relative_to("FuentesArchiveWidgets"))
+    elif path.startswith("FuentesArchiveTests/"):
+        rel = str(Path(path).relative_to("FuentesArchiveTests"))
+    else:
+        rel = str(Path(path).relative_to("FuentesArchive"))
     a(f"\t\t{file_ref(path)} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = {file_type(path)}; path = {q(rel)}; sourceTree = \"<group>\"; }};")
 a("/* End PBXFileReference section */")
 a("")
 a("/* Begin PBXFrameworksBuildPhase section */")
-for phase, name in ((APP_FRAMEWORKS_PHASE, "App"), (TEST_FRAMEWORKS_PHASE, "Tests")):
+for phase, name in ((APP_FRAMEWORKS_PHASE, "App"), (TEST_FRAMEWORKS_PHASE, "Tests"), (WIDGET_FRAMEWORKS_PHASE, "Widget")):
     a(f"\t\t{phase} /* Frameworks */ = {{")
     a("\t\t\tisa = PBXFrameworksBuildPhase;")
     a("\t\t\tbuildActionMask = 2147483647;")
@@ -143,6 +184,7 @@ a(f"\t\t{GROUP_MAIN} = {{")
 a("\t\t\tisa = PBXGroup;")
 a("\t\t\tchildren = (")
 a(f"\t\t\t\t{GROUP_APP} /* FuentesArchive */,")
+a(f"\t\t\t\t{GROUP_WIDGET} /* FuentesArchiveWidgets */,")
 a(f"\t\t\t\t{GROUP_TEST} /* FuentesArchiveTests */,")
 a(f"\t\t\t\t{GROUP_PRODUCTS} /* Products */,")
 a("\t\t\t);")
@@ -155,6 +197,15 @@ for path in APP + APP_RESOURCES:
     a(f"\t\t\t\t{file_ref(path)} /* {Path(path).name} */,")
 a("\t\t\t);")
 a("\t\t\tpath = FuentesArchive;")
+a("\t\t\tsourceTree = \"<group>\";")
+a("\t\t};")
+a(f"\t\t{GROUP_WIDGET} /* FuentesArchiveWidgets */ = {{")
+a("\t\t\tisa = PBXGroup;")
+a("\t\t\tchildren = (")
+for path in WIDGET:
+    a(f"\t\t\t\t{file_ref(path)} /* {Path(path).name} */,")
+a("\t\t\t);")
+a("\t\t\tpath = FuentesArchiveWidgets;")
 a("\t\t\tsourceTree = \"<group>\";")
 a("\t\t};")
 a(f"\t\t{GROUP_TEST} /* FuentesArchiveTests */ = {{")
@@ -170,6 +221,7 @@ a(f"\t\t{GROUP_PRODUCTS} /* Products */ = {{")
 a("\t\t\tisa = PBXGroup;")
 a("\t\t\tchildren = (")
 a(f"\t\t\t\t{APP_PRODUCT} /* FuentesArchive.app */,")
+a(f"\t\t\t\t{WIDGET_PRODUCT} /* FuentesArchiveWidgets.appex */,")
 a(f"\t\t\t\t{TEST_PRODUCT} /* FuentesArchiveTests.xctest */,")
 a("\t\t\t);")
 a("\t\t\tname = Products;")
@@ -185,15 +237,34 @@ a("\t\t\tbuildPhases = (")
 a(f"\t\t\t\t{APP_SOURCES_PHASE} /* Sources */,")
 a(f"\t\t\t\t{APP_FRAMEWORKS_PHASE} /* Frameworks */,")
 a(f"\t\t\t\t{APP_RESOURCES_PHASE} /* Resources */,")
+a(f"\t\t\t\t{EMBED_PHASE} /* Embed Foundation Extensions */,")
 a("\t\t\t);")
 a("\t\t\tbuildRules = (")
 a("\t\t\t);")
 a("\t\t\tdependencies = (")
+a(f"\t\t\t\t{APP_WIDGET_DEPENDENCY} /* PBXTargetDependency */,")
 a("\t\t\t);")
 a("\t\t\tname = FuentesArchive;")
 a("\t\t\tproductName = FuentesArchive;")
 a(f"\t\t\tproductReference = {APP_PRODUCT} /* FuentesArchive.app */;")
 a("\t\t\tproductType = \"com.apple.product-type.application\";")
+a("\t\t};")
+a(f"\t\t{WIDGET_TARGET} /* FuentesArchiveWidgets */ = {{")
+a("\t\t\tisa = PBXNativeTarget;")
+a(f"\t\t\tbuildConfigurationList = {CONFIG_LIST_WIDGET} /* Build configuration list for PBXNativeTarget \"FuentesArchiveWidgets\" */;")
+a("\t\t\tbuildPhases = (")
+a(f"\t\t\t\t{WIDGET_SOURCES_PHASE} /* Sources */,")
+a(f"\t\t\t\t{WIDGET_FRAMEWORKS_PHASE} /* Frameworks */,")
+a(f"\t\t\t\t{WIDGET_RESOURCES_PHASE} /* Resources */,")
+a("\t\t\t);")
+a("\t\t\tbuildRules = (")
+a("\t\t\t);")
+a("\t\t\tdependencies = (")
+a("\t\t\t);")
+a("\t\t\tname = FuentesArchiveWidgets;")
+a("\t\t\tproductName = FuentesArchiveWidgets;")
+a(f"\t\t\tproductReference = {WIDGET_PRODUCT} /* FuentesArchiveWidgets.appex */;")
+a("\t\t\tproductType = \"com.apple.product-type.app-extension\";")
 a("\t\t};")
 a(f"\t\t{TEST_TARGET} /* FuentesArchiveTests */ = {{")
 a("\t\t\tisa = PBXNativeTarget;")
@@ -225,6 +296,9 @@ a("\t\t\t\tTargetAttributes = {")
 a(f"\t\t\t\t\t{APP_TARGET} = {{")
 a("\t\t\t\t\t\tCreatedOnToolsVersion = 16.0;")
 a("\t\t\t\t\t};")
+a(f"\t\t\t\t\t{WIDGET_TARGET} = {{")
+a("\t\t\t\t\t\tCreatedOnToolsVersion = 16.0;")
+a("\t\t\t\t\t};")
 a(f"\t\t\t\t\t{TEST_TARGET} = {{")
 a("\t\t\t\t\t\tCreatedOnToolsVersion = 16.0;")
 a(f"\t\t\t\t\t\tTestTargetID = {APP_TARGET};")
@@ -245,6 +319,7 @@ a("\t\t\tprojectDirPath = \"\";")
 a("\t\t\tprojectRoot = \"\";")
 a("\t\t\ttargets = (")
 a(f"\t\t\t\t{APP_TARGET} /* FuentesArchive */,")
+a(f"\t\t\t\t{WIDGET_TARGET} /* FuentesArchiveWidgets */,")
 a(f"\t\t\t\t{TEST_TARGET} /* FuentesArchiveTests */,")
 a("\t\t\t);")
 a("\t\t};")
@@ -269,7 +344,28 @@ for path in TEST_RESOURCES:
 a("\t\t\t);")
 a("\t\t\trunOnlyForDeploymentPostprocessing = 0;")
 a("\t\t};")
+a(f"\t\t{WIDGET_RESOURCES_PHASE} /* Resources */ = {{")
+a("\t\t\tisa = PBXResourcesBuildPhase;")
+a("\t\t\tbuildActionMask = 2147483647;")
+a("\t\t\tfiles = (")
+a("\t\t\t);")
+a("\t\t\trunOnlyForDeploymentPostprocessing = 0;")
+a("\t\t};")
 a("/* End PBXResourcesBuildPhase section */")
+a("")
+a("/* Begin PBXCopyFilesBuildPhase section */")
+a(f"\t\t{EMBED_PHASE} /* Embed Foundation Extensions */ = {{")
+a("\t\t\tisa = PBXCopyFilesBuildPhase;")
+a("\t\t\tbuildActionMask = 2147483647;")
+a("\t\t\tdstPath = \"\";")
+a("\t\t\tdstSubfolderSpec = 13;")
+a("\t\t\tfiles = (")
+a(f"\t\t\t\t{EMBED_FILE} /* FuentesArchiveWidgets.appex in Embed Foundation Extensions */,")
+a("\t\t\t);")
+a("\t\t\tname = \"Embed Foundation Extensions\";")
+a("\t\t\trunOnlyForDeploymentPostprocessing = 0;")
+a("\t\t};")
+a("/* End PBXCopyFilesBuildPhase section */")
 a("")
 a("/* Begin PBXSourcesBuildPhase section */")
 a(f"\t\t{APP_SOURCES_PHASE} /* Sources */ = {{")
@@ -278,6 +374,15 @@ a("\t\t\tbuildActionMask = 2147483647;")
 a("\t\t\tfiles = (")
 for path in APP:
     a(f"\t\t\t\t{build_file(path)} /* {Path(path).name} */,")
+a("\t\t\t);")
+a("\t\t\trunOnlyForDeploymentPostprocessing = 0;")
+a("\t\t};")
+a(f"\t\t{WIDGET_SOURCES_PHASE} /* Sources */ = {{")
+a("\t\t\tisa = PBXSourcesBuildPhase;")
+a("\t\t\tbuildActionMask = 2147483647;")
+a("\t\t\tfiles = (")
+for path in [SHARED] + WIDGET:
+    a(f"\t\t\t\t{widget_build_file(path)} /* {Path(path).name} */,")
 a("\t\t\t);")
 a("\t\t\trunOnlyForDeploymentPostprocessing = 0;")
 a("\t\t};")
@@ -297,6 +402,11 @@ a(f"\t\t{DEPENDENCY} /* PBXTargetDependency */ = {{")
 a("\t\t\tisa = PBXTargetDependency;")
 a(f"\t\t\ttarget = {APP_TARGET} /* FuentesArchive */;")
 a(f"\t\t\ttargetProxy = {PROXY} /* PBXContainerItemProxy */;")
+a("\t\t};")
+a(f"\t\t{APP_WIDGET_DEPENDENCY} /* PBXTargetDependency */ = {{")
+a("\t\t\tisa = PBXTargetDependency;")
+a(f"\t\t\ttarget = {WIDGET_TARGET} /* FuentesArchiveWidgets */;")
+a(f"\t\t\ttargetProxy = {WIDGET_PROXY} /* PBXContainerItemProxy */;")
 a("\t\t};")
 a("/* End PBXTargetDependency section */")
 a("")
@@ -337,12 +447,13 @@ def config(debug: bool, kind: str) -> str:
             "CODE_SIGNING_ALLOWED": "NO",
             "CODE_SIGNING_REQUIRED": "NO",
             "CODE_SIGN_IDENTITY": '""',
-            "CURRENT_PROJECT_VERSION": "5",
+            "CODE_SIGN_ENTITLEMENTS": "FuentesArchive/FuentesArchive.entitlements",
+            "CURRENT_PROJECT_VERSION": "6",
             "GENERATE_INFOPLIST_FILE": "NO",
             "INFOPLIST_FILE": "FuentesArchive/Info.plist",
             "INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents": "YES",
             "LD_RUNPATH_SEARCH_PATHS": '"( $(inherited), @executable_path/Frameworks )"'.replace(" ", ""),
-            "MARKETING_VERSION": "1.4.0",
+            "MARKETING_VERSION": "1.5.0",
             "PRODUCT_BUNDLE_IDENTIFIER": "com.local.fuentesarchive",
             "PRODUCT_NAME": "FuentesArchive",
             "SUPPORTED_PLATFORMS": '"iphoneos iphonesimulator"',
@@ -365,6 +476,24 @@ def config(debug: bool, kind: str) -> str:
             "SWIFT_STRICT_CONCURRENCY": "minimal",
             "TEST_HOST": '"$(BUILT_PRODUCTS_DIR)/FuentesArchive.app/FuentesArchive"',
         })
+    elif kind == "widget":
+        common.update({
+            "APPLICATION_EXTENSION_API_ONLY": "YES",
+            "CODE_SIGNING_ALLOWED": "NO",
+            "CODE_SIGNING_REQUIRED": "NO",
+            "CODE_SIGN_IDENTITY": '""',
+            "CODE_SIGN_ENTITLEMENTS": "FuentesArchiveWidgets/FuentesArchiveWidgets.entitlements",
+            "CURRENT_PROJECT_VERSION": "6",
+            "GENERATE_INFOPLIST_FILE": "NO",
+            "INFOPLIST_FILE": "FuentesArchiveWidgets/Info.plist",
+            "LD_RUNPATH_SEARCH_PATHS": '"$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"',
+            "MARKETING_VERSION": "1.5.0",
+            "PRODUCT_BUNDLE_IDENTIFIER": "com.local.fuentesarchive.widgets",
+            "PRODUCT_NAME": "FuentesArchiveWidgets",
+            "SKIP_INSTALL": "YES",
+            "SWIFT_STRICT_CONCURRENCY": "minimal",
+            "TARGETED_DEVICE_FAMILY": '"1,2"',
+        })
     body = ["\t\t\tisa = XCBuildConfiguration;", f"\t\t\tbuildSettings = {{"]
     for key in sorted(common):
         body.append(f"\t\t\t\t{key} = {common[key]};")
@@ -381,6 +510,8 @@ for ident, debug, kind in (
     (CFG_APP_RELEASE, False, "app"),
     (CFG_TEST_DEBUG, True, "test"),
     (CFG_TEST_RELEASE, False, "test"),
+    (CFG_WIDGET_DEBUG, True, "widget"),
+    (CFG_WIDGET_RELEASE, False, "widget"),
 ):
     a(f"\t\t{ident} /* {'Debug' if debug else 'Release'} */ = {{")
     a(config(debug, kind))
@@ -392,6 +523,7 @@ for ident, debug_id, release_id, comment in (
     (CONFIG_LIST_PROJECT, CFG_PROJECT_DEBUG, CFG_PROJECT_RELEASE, "PBXProject \"FuentesArchive\""),
     (CONFIG_LIST_APP, CFG_APP_DEBUG, CFG_APP_RELEASE, "PBXNativeTarget \"FuentesArchive\""),
     (CONFIG_LIST_TEST, CFG_TEST_DEBUG, CFG_TEST_RELEASE, "PBXNativeTarget \"FuentesArchiveTests\""),
+    (CONFIG_LIST_WIDGET, CFG_WIDGET_DEBUG, CFG_WIDGET_RELEASE, "PBXNativeTarget \"FuentesArchiveWidgets\""),
 ):
     a(f"\t\t{ident} /* Build configuration list for {comment} */ = {{")
     a("\t\t\tisa = XCConfigurationList;")
@@ -432,6 +564,20 @@ scheme = f"""<?xml version="1.0" encoding="UTF-8"?>
                BlueprintIdentifier = "{APP_TARGET}"
                BuildableName = "FuentesArchive.app"
                BlueprintName = "FuentesArchive"
+               ReferencedContainer = "container:FuentesArchive.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "{WIDGET_TARGET}"
+               BuildableName = "FuentesArchiveWidgets.appex"
+               BlueprintName = "FuentesArchiveWidgets"
                ReferencedContainer = "container:FuentesArchive.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>

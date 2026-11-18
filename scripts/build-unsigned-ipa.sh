@@ -54,5 +54,23 @@ if ! unzip -l "$IPA" | grep -q "Payload/FuentesArchive.app/Info.plist"; then
   exit 1
 fi
 
+APPEX="Payload/FuentesArchive.app/PlugIns/FuentesArchiveWidgets.appex"
+if ! unzip -l "$IPA" | grep -q "${APPEX}/Info.plist"; then
+  echo "The widget extension is missing from the IPA:" >&2
+  unzip -l "$IPA" | grep -i -E 'appex|PlugIns' || true
+  exit 1
+fi
+rm -rf "$ROOT/build/appex-check"
+unzip -o -q "$IPA" "$APPEX/Info.plist" "Payload/FuentesArchive.app/Info.plist" -d "$ROOT/build/appex-check"
+APP_VER=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$ROOT/build/appex-check/Payload/FuentesArchive.app/Info.plist")
+APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$ROOT/build/appex-check/Payload/FuentesArchive.app/Info.plist")
+EXT_VER=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$ROOT/build/appex-check/${APPEX}/Info.plist")
+EXT_BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$ROOT/build/appex-check/${APPEX}/Info.plist")
+if [[ "$APP_VER" != "$EXT_VER" || "$APP_BUILD" != "$EXT_BUILD" ]]; then
+  echo "Widget version ${EXT_VER} (${EXT_BUILD}) does not match app ${APP_VER} (${APP_BUILD})" >&2
+  exit 1
+fi
+echo "Widget extension ${EXT_VER} (${EXT_BUILD}) is in the IPA."
+
 echo "Wrote $IPA"
 echo "Install it with SideStore (see README). It is unsigned on purpose."

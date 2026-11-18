@@ -329,6 +329,33 @@ final class ArchiveTests: XCTestCase {
         try? FileManager.default.removeItem(at: folder)
     }
 
+    func testProvisionGroupIDAndSnapshotRoundTrip() throws {
+        let provision = """
+        junk<?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>Entitlements</key>
+          <dict>
+            <key>com.apple.security.application-groups</key>
+            <array><string>group.TEAM.com.local.fuentesarchive</string></array>
+          </dict>
+        </dict></plist>tail
+        """
+        XCTAssertEqual(AppGroup.groupIDs(inProvision: Data(provision.utf8)), ["group.TEAM.com.local.fuentesarchive"])
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("snapshot-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var snapshot = ArchiveSnapshot.empty
+        snapshot.videoCount = 3
+        snapshot.activeTitle = "Alex Jones"
+        snapshot.videos = [SnapshotVideo(id: "v1", title: "Alex Jones", published: nil, duration: 10, isAudio: false, hasThumbnail: false)]
+        try SnapshotStore.write(snapshot, to: root)
+        let loaded = SnapshotStore.read(from: root)
+        XCTAssertEqual(loaded.videoCount, 3)
+        XCTAssertEqual(loaded.activeTitle, "Alex Jones")
+        XCTAssertEqual(loaded.videos.map(\.id), ["v1"])
+        try? FileManager.default.removeItem(at: root)
+    }
+
     private func fixture(_ name: String) throws -> String {
         let url = try XCTUnwrap(Bundle(for: ArchiveTests.self).url(forResource: (name as NSString).deletingPathExtension, withExtension: (name as NSString).pathExtension))
         return try String(contentsOf: url, encoding: .utf8)

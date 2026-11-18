@@ -642,7 +642,10 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
 
     private func emit(_ id: String, _ event: DownloadEvent) {
         let callback = onEvent
-        DispatchQueue.main.async { callback?(id, event) }
+        DispatchQueue.main.async {
+            callback?(id, event)
+            WidgetBridge.shared.handle(videoID: id, event: event)
+        }
     }
 
     private static func statusCode(_ error: RumbleError) -> Int? {

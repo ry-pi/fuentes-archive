@@ -11,6 +11,7 @@ struct FuentesArchiveApp: App {
             RootView()
                 .environmentObject(model)
                 .onAppear { model.syncIfStale() }
+                .onOpenURL { url in model.open(url) }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

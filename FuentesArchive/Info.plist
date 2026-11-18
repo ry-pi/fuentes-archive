@@ -8,6 +8,8 @@
 		<string>com.local.fuentesarchive.processing</string>
 		<string>com.local.fuentesarchive.continued</string>
 	</array>
+	<key>ArchiveAppGroup</key>
+	<string>group.com.local.fuentesarchive</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -24,6 +26,17 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.local.fuentesarchive</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>fuentesarchive</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
@@ -31,6 +44,8 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Fuentes Archive can copy a finished download into Photos when you turn that on in Settings. The file always stays in the Files app either way.</string>

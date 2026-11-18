@@ -12,6 +12,35 @@ final class AppModel: ObservableObject {
     @Published var sort: LibrarySort = .newest
     @Published var filter: LibraryFilter = .all
     @Published var search = ""
+    @Published var section: ArchiveSection = .videos
+    @Published var pendingVideoID: String?
+    @Published var pendingPlayID: String?
+
+    func open(_ url: URL) {
+        guard url.scheme == "fuentesarchive" else { return }
+        let host = url.host ?? ""
+        if host == "downloads" {
+            section = .downloads
+            return
+        }
+        if host == "player" {
+            section = .player
+            return
+        }
+        if host == "video" {
+            let id = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !id.isEmpty else { section = .videos; return }
+            if snapshot.videos[id]?.status == .downloaded {
+                section = .player
+                pendingPlayID = id
+            } else {
+                section = .videos
+                pendingVideoID = id
+            }
+            return
+        }
+        section = .videos
+    }
 
     private let client = RumbleClient()
     private let monitor = NWPathMonitor()
@@ -32,6 +61,7 @@ final class AppModel: ObservableObject {
             } else {
                 DispatchQueue.main.async { MainActor.assumeIsolated(apply) }
             }
+            WidgetBridge.shared.refreshSnapshot(force: false)
         }
         DownloadManager.shared.onEvent = { [weak self] id, event in
             Task { @MainActor in
@@ -861,6 +891,10 @@ final class AppModel: ObservableObject {
             state.log.append(LogEntry(id: UUID().uuidString, date: Date(), source: source, message: message, level: level))
         }
     }
+}
+
+enum ArchiveSection: String, Hashable {
+    case videos, downloads, player
 }
 
 enum LibrarySort: String, CaseIterable, Identifiable {

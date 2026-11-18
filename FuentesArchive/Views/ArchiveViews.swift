@@ -100,13 +100,16 @@ struct RootView: View {
     @State private var selection: String?
 
     var body: some View {
-        TabView {
+        TabView(selection: $model.section) {
             NavigationStack { library }
+                .tag(ArchiveSection.videos)
                 .tabItem { Label("Videos", systemImage: "play.rectangle.on.rectangle") }
             NavigationStack { DownloadsView() }
                 .badge(model.activeDownloadCount)
+                .tag(ArchiveSection.downloads)
                 .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
             NavigationStack { PlayerTab() }
+                .tag(ArchiveSection.player)
                 .tabItem { Label("Player", systemImage: "headphones") }
         }
         .preferredColorScheme(.dark)
@@ -190,6 +193,11 @@ struct LibraryView: View {
             if let optionsID {
                 DownloadOptionsSheet(videoID: optionsID)
             }
+        }
+        .onChange(of: model.pendingVideoID) { _, id in
+            guard let id else { return }
+            optionsID = id
+            model.pendingVideoID = nil
         }
         .searchable(text: $model.search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
         .refreshable { model.sync(trigger: "pull") }

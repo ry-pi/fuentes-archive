@@ -19,6 +19,15 @@
       "category": "entertainment",
       "versions": [
         {
+          "version": "1.5.0",
+          "buildVersion": "6",
+          "date": "2026-11-18T23:50:00Z",
+          "localizedDescription": "Home screen and lock screen widgets, plus a Live Activity for the download in progress. The widget extension is included in the unsigned IPA.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa",
+          "size": 2500000,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.4.0",
           "buildVersion": "5",
           "date": "2026-11-18T21:00:00Z",

@@ -20,6 +20,20 @@
                ReferencedContainer = "container:FuentesArchive.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "FD72F991D3575FD9BCFAEF6A"
+               BuildableName = "FuentesArchiveWidgets.appex"
+               BlueprintName = "FuentesArchiveWidgets"
+               ReferencedContainer = "container:FuentesArchive.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

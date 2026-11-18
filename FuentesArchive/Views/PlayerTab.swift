@@ -49,6 +49,11 @@ struct PlayerTab: View {
         .fullScreenCover(item: $selected) { video in
             ArchivePlayer(video: video)
         }
+        .onChange(of: model.pendingPlayID) { _, id in
+            guard let id, let video = model.video(id) else { return }
+            selected = video
+            model.pendingPlayID = nil
+        }
         .sheet(isPresented: Binding(get: { shareURL != nil }, set: { if !$0 { shareURL = nil } })) {
             if let shareURL {
                 ShareSheet(url: shareURL)
