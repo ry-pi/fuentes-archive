@@ -15,7 +15,7 @@ struct ArchiveWidgetsBundle: WidgetBundle {
     var body: some Widget {
         LatestVideoWidget()
         DownloadRingWidget()
-        GalleryWidgets()
+        GalleryWidgets().body
         LockScreenWidget()
         DownloadLiveActivity()
     }
