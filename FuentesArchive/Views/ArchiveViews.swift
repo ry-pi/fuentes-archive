@@ -505,12 +505,14 @@ struct SettingsView: View {
                 NavigationLink("Auto-Download") { AutoDownloadSettings() }
                 Toggle("Save a copy to Photos", isOn: binding(\.saveToPhotos))
             }
-            Section("Export / Import") {
+            Section {
                 Button("Export library data") {
                     exportFile = ArchiveFile(data: model.exportData())
                     exporting = true
                 }
                 Button("Import library data") { importing = true }
+            } header: {
+                Text("Export / Import")
             } footer: {
                 Text("The file keeps settings, playback positions, and video metadata. It does not include the video or audio files.")
             }
