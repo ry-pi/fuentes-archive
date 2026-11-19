@@ -404,19 +404,91 @@ struct DiskFootprint: Equatable {
     var capacity: Int64
 }
 
+enum ArchiveTransfer {
+    static let schema = 1
+
+    struct Payload: Codable, Equatable {
+        var schema: Int
+        var exportedAt: Date
+        var settings: Settings
+        var lastSync: Date?
+        var watermark: Date?
+        var baselineReady: Bool
+        var knownIDs: [String]
+        var ignoredIDs: [String]
+        var log: [LogEntry]
+        var videos: [VideoRecord]
+    }
+
+    enum TransferError: LocalizedError {
+        case schema(Int)
+        case unreadable
+        var errorDescription: String? {
+            switch self {
+            case let .schema(found):
+                return "This backup uses schema \(found). This app reads schema \(ArchiveTransfer.schema)."
+            case .unreadable:
+                return "That file is not a Fuentes Archive backup."
+            }
+        }
+    }
+
+    static func exportData(_ state: LibraryState) throws -> Data {
+        let payload = Payload(
+            schema: schema,
+            exportedAt: Date(),
+            settings: state.settings,
+            lastSync: state.lastSync,
+            watermark: state.watermark,
+            baselineReady: state.baselineReady,
+            knownIDs: state.knownIDs,
+            ignoredIDs: state.ignoredIDs,
+            log: state.log,
+            videos: Array(state.videos.values)
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(payload)
+    }
+
+    static func parse(_ data: Data) throws -> Payload {
+        struct Header: Decodable { var schema: Int }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let header = try? decoder.decode(Header.self, from: data) else { throw TransferError.unreadable }
+        guard header.schema == schema else { throw TransferError.schema(header.schema) }
+        guard let payload = try? decoder.decode(Payload.self, from: data) else { throw TransferError.unreadable }
+        return payload
+    }
+}
+
+enum QualityLabel {
+    static func display(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        if trimmed.lowercased().contains("audio") { return "Audio" }
+        guard let range = trimmed.range(of: #"[1-9]\d*p"#, options: .regularExpression) else { return nil }
+        return String(trimmed[range])
+    }
+}
+
 enum DiskUsage {
     static func current() -> DiskFootprint {
         let files = FileManager.default
         let bundle = treeBytes(Bundle.main.bundleURL)
         let library = files.urls(for: .libraryDirectory, in: .userDomainMask).first
         let caches = files.urls(for: .cachesDirectory, in: .userDomainMask).first
-        let cachesPath = caches?.standardizedFileURL.path
-        let libraryBytes = library.map { treeBytes($0, skipping: cachesPath.map { [$0] } ?? []) } ?? 0
+        let partials = LibraryStore.shared.supportURL.appendingPathComponent("Partial", isDirectory: true)
+        var skip = [partials.standardizedFileURL.path]
+        if let cachesPath = caches?.standardizedFileURL.path { skip.append(cachesPath) }
+        let libraryBytes = library.map { treeBytes($0, skipping: skip) } ?? 0
         let cacheBytes = caches.map { treeBytes($0) } ?? 0
         let temporary = treeBytes(files.temporaryDirectory)
         return DiskFootprint(
             app: bundle + libraryBytes + cacheBytes + temporary,
-            downloads: treeBytes(Paths.videosDirectory),
+            downloads: treeBytes(Paths.videosDirectory) + treeBytes(partials),
             capacity: volumeCapacity()
         )
     }

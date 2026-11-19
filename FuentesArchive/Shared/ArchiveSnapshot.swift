@@ -154,6 +154,19 @@ enum SnapshotBytes {
         return formatter.string(fromByteCount: max(count, 0))
     }
 
+    /// Compact progress such as "35/102 MB". Empty when nothing has been counted yet.
+    static func progress(written: Int64, expected: Int64) -> String {
+        if written <= 0 && expected <= 0 { return "" }
+        func mega(_ bytes: Int64) -> String {
+            if bytes <= 0 { return "0" }
+            let value = Double(bytes) / (1024 * 1024)
+            if value >= 10 { return String(format: "%.0f", value.rounded()) }
+            return String(format: "%.1f", value)
+        }
+        if expected > 0 { return "\(mega(written))/\(mega(expected)) MB" }
+        return "\(mega(written)) MB"
+    }
+
     static func eta(remaining: Int64, rate: Double) -> String {
         guard rate > 1, remaining > 0 else { return "" }
         let seconds = Int(Double(remaining) / rate)

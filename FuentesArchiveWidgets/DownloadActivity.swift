@@ -6,8 +6,9 @@ struct DownloadLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: DownloadActivityAttributes.self) { context in
             lockScreen(context.state)
-                .activityBackgroundTint(Color.black.opacity(0.85))
-                .activitySystemActionForegroundColor(Color(red: 0.93, green: 0.76, blue: 0.31))
+                .foregroundStyle(.white)
+                .activityBackgroundTint(Color(red: 0.05, green: 0.10, blue: 0.22))
+                .activitySystemActionForegroundColor(Color.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -18,12 +19,12 @@ struct DownloadLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     Text("\(Int(context.state.percent * 100))%")
                         .font(.headline.monospacedDigit())
-                        .foregroundStyle(Color(red: 0.93, green: 0.76, blue: 0.31))
+                        .foregroundStyle(Color(red: 0.80, green: 0.12, blue: 0.18))
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 4) {
                         ProgressView(value: min(max(context.state.percent, 0), 1))
-                            .tint(Color(red: 0.93, green: 0.76, blue: 0.31))
+                            .tint(Color(red: 0.80, green: 0.12, blue: 0.18))
                         Text(detail(context.state))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -48,7 +49,7 @@ struct DownloadLiveActivity: Widget {
                 .font(.headline)
                 .lineLimit(1)
             ProgressView(value: min(max(state.percent, 0), 1))
-                .tint(Color(red: 0.93, green: 0.76, blue: 0.31))
+                .tint(Color(red: 0.80, green: 0.12, blue: 0.18))
             Text(detail(state))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -57,9 +58,7 @@ struct DownloadLiveActivity: Widget {
     }
 
     private func detail(_ state: DownloadActivityAttributes.ContentState) -> String {
-        let written = SnapshotBytes.string(state.bytesWritten)
-        let expected = state.bytesExpected > 0 ? SnapshotBytes.string(state.bytesExpected) : ""
-        let size = expected.isEmpty ? written : "\(written) / \(expected)"
+        let size = SnapshotBytes.progress(written: state.bytesWritten, expected: state.bytesExpected)
         let remaining = max(state.bytesExpected - state.bytesWritten, 0)
         let eta = SnapshotBytes.eta(remaining: remaining, rate: state.bytesPerSecond)
         let speed = state.bytesPerSecond > 1 ? SnapshotBytes.string(Int64(state.bytesPerSecond)) + "/s" : ""

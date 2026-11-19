@@ -6,16 +6,20 @@ final class WidgetBridge {
     static let shared = WidgetBridge()
     private var lastSnapshot = Date.distantPast
     private var lastActivity = Date.distantPast
+    private var wasDownloading = false
     private let thumbs = URLSession(configuration: .ephemeral)
 
     func handle(videoID: String, event: DownloadEvent) {
         switch event {
         case .finished, .failed, .paused:
+            wasDownloading = false
             refreshSnapshot(force: true)
             syncActivity(force: true)
         case .progress:
-            refreshSnapshot(force: false)
-            syncActivity(force: false)
+            let starting = !wasDownloading
+            wasDownloading = true
+            refreshSnapshot(force: starting)
+            syncActivity(force: starting)
         }
     }
 

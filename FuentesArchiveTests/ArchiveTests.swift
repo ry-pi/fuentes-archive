@@ -267,6 +267,28 @@ final class ArchiveTests: XCTestCase {
         XCTAssertEqual(record.segmentDone, 1)
     }
 
+    func testTransferTextAndQualityLabel() {
+        XCTAssertEqual(SnapshotBytes.progress(written: 35 * 1024 * 1024, expected: 102 * 1024 * 1024), "35/102 MB")
+        XCTAssertEqual(SnapshotBytes.progress(written: 12 * 1024 * 1024, expected: 0), "12 MB")
+        XCTAssertEqual(SnapshotBytes.progress(written: 0, expected: 0), "")
+        XCTAssertEqual(QualityLabel.display("0p MP4"), nil)
+        XCTAssertEqual(QualityLabel.display("720p MP4"), "720p")
+        XCTAssertEqual(QualityLabel.display("Audio only"), "Audio")
+    }
+
+    func testBackupSchemaRejectsUnknownVersions() throws {
+        let bad = Data("{\"schema\":9}".utf8)
+        XCTAssertThrowsError(try ArchiveTransfer.parse(bad))
+        var state = LibraryState()
+        state.settings.autoAudioOnly = true
+        state.settings.maxConcurrent = 3
+        let data = try ArchiveTransfer.exportData(state)
+        let payload = try ArchiveTransfer.parse(data)
+        XCTAssertEqual(payload.schema, 1)
+        XCTAssertTrue(payload.settings.autoAudioOnly)
+        XCTAssertEqual(payload.settings.maxConcurrent, 3)
+    }
+
     func testAutoPolicyKeepsNewestAfterTheCutoff() {
         let older = Date(timeIntervalSince1970: 1_700_000_000)
         let mid = Date(timeIntervalSince1970: 1_730_000_000)

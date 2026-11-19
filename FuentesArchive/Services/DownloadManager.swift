@@ -28,6 +28,9 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
     private var sessionEventsFinished = false
     private var minimumGeneration: [String: Int] = [:]
     private var pausedIDs: Set<String> = []
+    private var liveBytes: [ObjectIdentifier: Int64] = [:]
+    private var expectedTotals: [String: Int64] = [:]
+    private var lastByteReport: [String: Date] = [:]
     private let assembly = DispatchQueue(label: "archive.assembly", qos: .utility)
 
     private struct Job {
@@ -159,7 +162,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         minimumGeneration[videoID] = generation
         jobs[videoID] = nil
         lock.unlock()
-        let quality = audioOnly ? "Audio only" : "\(variant.height)p \(container.uppercased())"
+        let quality = Self.qualityTitle(height: variant.height, audioOnly: audioOnly)
         let segmented = variant.kind == "tar" || variant.kind == "hls" || variant.url.contains(".m3u8") || variant.url.contains(".tar")
         DebugLog.event("download start \(videoID) \(quality) direct=\(!segmented) bytes=\(variant.size) \(variant.url)")
         if !segmented {
@@ -180,6 +183,11 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             lock.lock()
             jobs[videoID] = Job(segments: [], ext: ext, quality: quality, nextIndex: 0, inFlight: 1, retries: [:], retryIndexes: [], singleFile: true, failed: false, allowCellular: allowCellular, generation: generation, busy: [], audioOnly: audioOnly)
             lock.unlock()
+            if variant.size > 0 { rememberExpected(videoID, variant.size) }
+            publishQuality(videoID, quality)
+            if variant.size > 0 {
+                emit(videoID, .progress(0, 0, variant.size, 0, 0))
+            }
             startFile(videoID: videoID, url: url, allowCellular: allowCellular, generation: generation)
             return
         }
@@ -192,14 +200,17 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 let client = RumbleClient()
                 var playlist = HLSPlaylist.parse(try await client.text(playlistURL), baseURL: playlistURL)
                 if playlist.encrypted { throw RumbleError.encrypted }
+                var resolvedHeight = variant.height
                 if playlist.master {
                     guard let chosen = HLSPlaylist.select(playlist.variants, capHeight: capHeight) else { throw RumbleError.noStream }
+                    resolvedHeight = chosen.height
                     playlist = HLSPlaylist.parse(try await client.text(chosen.url), baseURL: chosen.url)
                 }
                 if playlist.encrypted { throw RumbleError.encrypted }
                 guard !playlist.segments.isEmpty else { throw RumbleError.noStream }
                 let estimate = playlist.segments.reduce(Int64(0)) { $0 + (HLSPlaylist.byteLength(of: $1.url) ?? 0) }
                 let bytes = estimate > 0 ? estimate : variant.size
+                let quality = Self.qualityTitle(height: resolvedHeight, audioOnly: audioOnly)
                 // Segments and the MP4 exist at the same time until the pieces are deleted.
                 if !self.hasRoom(for: bytes * 2) { throw RumbleError.diskSpace }
                 let folder = LibraryStore.shared.partialURL(videoID)
@@ -210,6 +221,8 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
                 let manifest = Manifest(urls: urls.map(\.absoluteString), ext: outputExt, quality: quality, audioOnly: audioOnly)
                 try JSONEncoder().encode(manifest).write(to: folder.appendingPathComponent("manifest.json"), options: .atomic)
                 guard self.isCurrent(videoID, generation), !self.pausedIDs.contains(videoID) else { return }
+                self.rememberExpected(videoID, bytes)
+                self.publishQuality(videoID, quality)
                 self.enqueueSegments(videoID: videoID, urls: urls, ext: outputExt, quality: quality, allowCellular: allowCellular, generation: generation, alreadyRunning: [], audioOnly: audioOnly)
             } catch {
                 self.emit(videoID, .failed(error.localizedDescription, (error as? RumbleError).flatMap(Self.statusCode)))
@@ -327,6 +340,9 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             return
         }
         markHandled(downloadTask)
+        lock.lock()
+        liveBytes[ObjectIdentifier(downloadTask)] = nil
+        lock.unlock()
         if note.index == nil {
             finishFile(videoID: note.videoID, temp: dest)
         } else {
@@ -335,14 +351,24 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard let note = note(for: downloadTask), note.index == nil, totalBytesExpectedToWrite > 0 else { return }
-        emit(note.videoID, .progress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), totalBytesWritten, totalBytesExpectedToWrite, 0, 0))
+        guard let note = note(for: downloadTask) else { return }
+        if note.index == nil {
+            guard totalBytesExpectedToWrite > 0 else { return }
+            rememberExpected(note.videoID, totalBytesExpectedToWrite)
+            emit(note.videoID, .progress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), totalBytesWritten, totalBytesExpectedToWrite, 0, 0))
+            return
+        }
+        lock.lock()
+        liveBytes[ObjectIdentifier(downloadTask)] = totalBytesWritten
+        lock.unlock()
+        reportSegments(note.videoID)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let note = note(for: task) else { return }
         lock.lock()
         let key = ObjectIdentifier(task)
+        liveBytes[key] = nil
         taskNotes[key] = nil
         let already = handledTasks.contains(key)
         if already { handledTasks.remove(key) }
@@ -382,7 +408,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             assemble(videoID: videoID)
             return
         }
-        emit(videoID, .progress(Double(next) / Double(max(urls.count, 1)), 0, 0, next, urls.count))
+        reportSegments(videoID, force: true)
         fill(videoID: videoID)
     }
 
@@ -430,7 +456,7 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         lock.unlock()
         let folder = LibraryStore.shared.partialURL(videoID)
         let done = (0..<total).filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent(String(format: "seg-%05d.part", $0)).path) }.count
-        emit(videoID, .progress(total == 0 ? 1 : Double(done) / Double(total), 0, 0, done, total))
+        reportSegments(videoID, force: true)
         if done >= total {
             assemble(videoID: videoID)
         } else {
@@ -638,6 +664,66 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         let values = try? Paths.documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         guard let free = values?.volumeAvailableCapacityForImportantUsage else { return true }
         return free > estimate + 64 * 1024 * 1024
+    }
+
+    private static func qualityTitle(height: Int, audioOnly: Bool) -> String {
+        if audioOnly { return "Audio" }
+        if height > 0 { return "\(height)p" }
+        return ""
+    }
+
+    private func publishQuality(_ videoID: String, _ label: String) {
+        guard let pretty = QualityLabel.display(label) else { return }
+        LibraryStore.shared.update { state in
+            guard var record = state.videos[videoID] else { return }
+            record.qualityLabel = pretty
+            state.videos[videoID] = record
+        }
+    }
+
+    private func rememberExpected(_ videoID: String, _ bytes: Int64) {
+        guard bytes > 0 else { return }
+        lock.lock()
+        expectedTotals[videoID] = bytes
+        lock.unlock()
+    }
+
+    private func reportSegments(_ videoID: String, force: Bool = false) {
+        if !force {
+            lock.lock()
+            let last = lastByteReport[videoID] ?? .distantPast
+            if Date().timeIntervalSince(last) < 0.4 {
+                lock.unlock()
+                return
+            }
+            lastByteReport[videoID] = Date()
+            lock.unlock()
+        }
+        let folder = LibraryStore.shared.partialURL(videoID)
+        var disk: Int64 = 0
+        if let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey]) {
+            for file in files where file.lastPathComponent.hasPrefix("seg-") {
+                disk += DiskUsage.fileBytes(file)
+            }
+        }
+        lock.lock()
+        let live = taskNotes.reduce(Int64(0)) { sum, pair in
+            pair.value.videoID == videoID ? sum + (liveBytes[pair.key] ?? 0) : sum
+        }
+        let expected = expectedTotals[videoID] ?? 0
+        let total = jobs[videoID]?.segments.count ?? 0
+        lock.unlock()
+        let written = disk + live
+        let done = (0..<total).filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent(String(format: "seg-%05d.part", $0)).path) }.count
+        let fraction: Double
+        if expected > 0 {
+            fraction = min(1, Double(written) / Double(expected))
+        } else if total > 0 {
+            fraction = Double(done) / Double(total)
+        } else {
+            fraction = 0
+        }
+        emit(videoID, .progress(fraction, written, expected, done, total))
     }
 
     private func emit(_ id: String, _ event: DownloadEvent) {

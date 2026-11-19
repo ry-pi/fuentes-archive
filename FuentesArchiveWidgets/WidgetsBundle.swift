@@ -1,14 +1,21 @@
 import SwiftUI
 import WidgetKit
 
+struct GalleryWidgets: WidgetBundle {
+    var body: some Widget {
+        LatestThreeWidget()
+        AdaptiveDownloadWidget()
+        StatsWidget()
+        ArchiveListWidget()
+    }
+}
+
 @main
 struct ArchiveWidgetsBundle: WidgetBundle {
     var body: some Widget {
         LatestVideoWidget()
         DownloadRingWidget()
-        LatestThreeWidget()
-        StatsWidget()
-        ArchiveListWidget()
+        GalleryWidgets()
         LockScreenWidget()
         DownloadLiveActivity()
     }
@@ -36,14 +43,16 @@ struct SnapshotProvider: TimelineProvider {
 }
 
 enum WidgetColor {
-    static let background = Color(red: 0.07, green: 0.07, blue: 0.08)
-    static let gold = Color(red: 0.93, green: 0.76, blue: 0.31)
-    static let muted = Color(white: 0.62)
+    static let background = Color(red: 0.05, green: 0.10, blue: 0.22)
+    static let gold = Color(red: 0.80, green: 0.12, blue: 0.18)
+    static let muted = Color(white: 0.86)
+    static let stripe = Color.white
 }
 
 extension View {
     func archiveWidgetBackground() -> some View {
-        containerBackground(WidgetColor.background, for: .widget)
+        foregroundStyle(.white)
+            .containerBackground(WidgetColor.background, for: .widget)
     }
 }
 

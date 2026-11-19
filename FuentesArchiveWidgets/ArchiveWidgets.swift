@@ -64,6 +64,18 @@ struct ArchiveListWidget: Widget {
     }
 }
 
+struct AdaptiveDownloadWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "adaptive-download", provider: SnapshotProvider()) { entry in
+            AdaptiveDownloadView(snapshot: entry.snapshot)
+                .archiveWidgetBackground()
+        }
+        .configurationDisplayName("Now and recent")
+        .description("Download progress while something is saving, otherwise the three newest videos.")
+        .supportedFamilies([.systemMedium])
+    }
+}
+
 struct LockScreenWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "archive-lock", provider: SnapshotProvider()) { entry in
@@ -222,6 +234,50 @@ struct ArchiveListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+struct AdaptiveDownloadView: View {
+    var snapshot: ArchiveSnapshot
+
+    var body: some View {
+        if snapshot.queueCount > 0, !snapshot.activeTitle.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(snapshot.activeTitle)
+                    .font(.headline)
+                    .lineLimit(1)
+                ProgressView(value: min(max(snapshot.activePercent, 0), 1))
+                    .tint(WidgetColor.gold)
+                HStack {
+                    Text(SnapshotBytes.progress(written: snapshot.activeBytesWritten, expected: snapshot.activeBytesExpected))
+                    Spacer()
+                    Text(snapshot.queueCount == 1 ? "1 in queue" : "\(snapshot.queueCount) in queue")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(WidgetColor.muted)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .widgetURL(ArchiveLink.downloads)
+        } else {
+            HStack(spacing: 8) {
+                ForEach(Array(snapshot.videos.prefix(3))) { video in
+                    Link(destination: ArchiveLink.video(video.id)) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            thumbnail(video)
+                            Text(video.title)
+                                .font(.caption2.weight(.semibold))
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                if snapshot.videos.isEmpty {
+                    Text("No saved videos yet")
+                        .font(.caption)
+                        .foregroundStyle(WidgetColor.muted)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
     }
 }
 

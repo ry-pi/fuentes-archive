@@ -1,14 +1,15 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 enum Theme {
-    static let background = Color(red: 0.055, green: 0.055, blue: 0.06)
-    static let card = Color(red: 0.11, green: 0.11, blue: 0.125)
-    static let line = Color.white.opacity(0.08)
-    static let gold = Color(red: 0.93, green: 0.76, blue: 0.31)
-    static let muted = Color(white: 0.62)
-    static let danger = Color(red: 0.90, green: 0.36, blue: 0.32)
-    static let ok = Color(red: 0.45, green: 0.74, blue: 0.52)
+    static let background = Color(red: 0.04, green: 0.09, blue: 0.20)
+    static let card = Color(red: 0.08, green: 0.15, blue: 0.30)
+    static let line = Color.white.opacity(0.16)
+    static let gold = Color(red: 0.80, green: 0.12, blue: 0.18)
+    static let muted = Color(white: 0.86)
+    static let danger = Color(red: 0.92, green: 0.28, blue: 0.30)
+    static let ok = Color(red: 0.78, green: 0.86, blue: 0.98)
 }
 
 enum Format {
@@ -232,8 +233,20 @@ struct LibraryView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Nicholas J. Fuentes")
-                .font(.title2.weight(.semibold))
+            HStack(spacing: 6) {
+                Image(systemName: "star.fill")
+                    .foregroundStyle(Theme.gold)
+                Text("Nicholas J. Fuentes")
+                    .font(.title2.weight(.semibold))
+                Image(systemName: "star.fill")
+                    .foregroundStyle(.white)
+            }
+            Capsule()
+                .fill(Theme.gold)
+                .frame(height: 3)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(.white).frame(width: 72)
+                }
             Text("Videos tab only · rumble.com/c/nickjfuentes/videos")
                 .font(.footnote)
                 .foregroundStyle(Theme.muted)
@@ -467,7 +480,7 @@ struct VideoDetailView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(Theme.gold)
-        .foregroundStyle(.black)
+        .foregroundStyle(.white)
     }
 
     private func label(_ title: String, _ symbol: String) -> some View {
@@ -479,12 +492,27 @@ struct VideoDetailView: View {
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var feedURL: URL?
+    @State private var exportFile: ArchiveFile?
+    @State private var exporting = false
+    @State private var importing = false
+    @State private var pendingImport: ArchiveTransfer.Payload?
+    @State private var confirmImport = false
+    @State private var importError: String?
 
     var body: some View {
         Form {
             Section("Downloads") {
                 NavigationLink("Auto-Download") { AutoDownloadSettings() }
                 Toggle("Save a copy to Photos", isOn: binding(\.saveToPhotos))
+            }
+            Section("Export / Import") {
+                Button("Export library data") {
+                    exportFile = ArchiveFile(data: model.exportData())
+                    exporting = true
+                }
+                Button("Import library data") { importing = true }
+            } footer: {
+                Text("The file keeps settings, playback positions, and video metadata. It does not include the video or audio files.")
             }
             Section("Library") {
                 LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
@@ -517,6 +545,47 @@ struct SettingsView: View {
             if let feedURL {
                 ShareSheet(url: feedURL)
             }
+        }
+        .fileExporter(
+            isPresented: $exporting,
+            document: exportFile,
+            contentType: UTType.json,
+            defaultFilename: "FuentesArchive-backup"
+        ) { (_ result: Result<URL, Error>) in
+            if case let .failure(error) = result { importError = error.localizedDescription }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [UTType.json]) { (result: Result<URL, Error>) in
+            switch result {
+            case let .success(url):
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    pendingImport = try ArchiveTransfer.parse(Data(contentsOf: url))
+                    confirmImport = true
+                } catch {
+                    importError = error.localizedDescription
+                }
+            case let .failure(error):
+                importError = error.localizedDescription
+            }
+        }
+        .confirmationDialog("Import archive data?", isPresented: $confirmImport, titleVisibility: .visible) {
+            Button("Merge") {
+                if let pendingImport { model.importArchive(pendingImport, replace: false) }
+                pendingImport = nil
+            }
+            Button("Replace metadata", role: .destructive) {
+                if let pendingImport { model.importArchive(pendingImport, replace: true) }
+                pendingImport = nil
+            }
+            Button("Cancel", role: .cancel) { pendingImport = nil }
+        } message: {
+            Text("Media files stay on this iPhone. Merge keeps videos already here. Replace swaps the list and settings.")
+        }
+        .alert("Could not import", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
+            Button("OK", role: .cancel) { importError = nil }
+        } message: {
+            Text(importError ?? "")
         }
     }
 
@@ -624,6 +693,24 @@ struct AutoDownloadSettings: View {
             get: { model.settings[keyPath: keyPath] },
             set: { newValue in model.updateSettings { $0[keyPath: keyPath] = newValue } }
         )
+    }
+}
+
+struct ArchiveFile: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+
+    init(data: Data) { self.data = data }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
 
@@ -899,11 +986,17 @@ struct DownloadsView: View {
     private var rows: [VideoRecord] { model.downloadRows() }
 
     private var savedSignature: String {
-        model.snapshot.videos.values
+        let saved = model.snapshot.videos.values
             .filter { $0.status == .downloaded }
             .compactMap(\.relativePath)
             .sorted()
             .joined(separator: "|")
+        let partial = model.snapshot.videos.values
+            .filter { $0.status == .downloading || $0.status == .paused || $0.status == .queued }
+            .map { "\($0.id):\($0.bytesWritten / (1024 * 1024))" }
+            .sorted()
+            .joined(separator: "|")
+        return saved + "#" + partial
     }
 
     private var canPauseAll: Bool {
@@ -1049,7 +1142,7 @@ struct DownloadRow: View {
 
     private var statusLine: String {
         var parts = [video.status.label]
-        if let label = video.qualityLabel { parts.append(label) }
+        if let label = QualityLabel.display(video.qualityLabel) { parts.append(label) }
         if video.status == .downloading {
             let speed = Format.rate(video.bytesPerSecond)
             if !speed.isEmpty { parts.append(speed) }
@@ -1062,10 +1155,7 @@ struct DownloadRow: View {
     }
 
     private var sizeLine: String {
-        if video.bytesExpected > 0 {
-            return Format.bytes(video.bytesWritten) + " / " + Format.bytes(video.bytesExpected)
-        }
-        return Format.bytes(video.bytesWritten)
+        SnapshotBytes.progress(written: video.bytesWritten, expected: video.bytesExpected)
     }
 }
 

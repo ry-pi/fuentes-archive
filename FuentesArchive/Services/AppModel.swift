@@ -376,6 +376,56 @@ final class AppModel: ObservableObject {
         for id in snapshot.videos.keys { deleteFile(id) }
     }
 
+    func exportData() -> Data {
+        (try? ArchiveTransfer.exportData(snapshot)) ?? Data()
+    }
+
+    func importArchive(_ payload: ArchiveTransfer.Payload, replace: Bool) {
+        LibraryStore.shared.update { state in
+            state.settings = payload.settings
+            state.lastSync = payload.lastSync
+            state.watermark = payload.watermark
+            state.baselineReady = payload.baselineReady
+            state.ignoredIDs = payload.ignoredIDs
+            if replace {
+                state.log = payload.log
+                state.knownIDs = payload.knownIDs
+                var videos: [String: VideoRecord] = [:]
+                for video in payload.videos {
+                    videos[video.id] = Self.prepared(video)
+                }
+                state.videos = videos
+            } else {
+                for id in payload.knownIDs where !state.knownIDs.contains(id) {
+                    state.knownIDs.append(id)
+                }
+                for video in payload.videos {
+                    if var existing = state.videos[video.id] {
+                        existing.playbackSeconds = max(existing.playbackSeconds, video.playbackSeconds)
+                        existing.title = video.title
+                        existing.published = video.published ?? existing.published
+                        state.videos[video.id] = existing
+                    } else {
+                        state.videos[video.id] = Self.prepared(video)
+                    }
+                }
+            }
+        }
+        BackgroundScheduler.scheduleAll()
+    }
+
+    private static func prepared(_ video: VideoRecord) -> VideoRecord {
+        var copy = video
+        if let path = copy.relativePath {
+            let url = LibraryStore.shared.fileURL(relativePath: path)
+            if !FileManager.default.fileExists(atPath: url.path) {
+                copy.relativePath = nil
+                if copy.status == .downloaded { copy.status = .catalogued }
+            }
+        }
+        return copy
+    }
+
     func updateSettings(_ body: (inout Settings) -> Void) {
         LibraryStore.shared.update { body(&$0.settings) }
         BackgroundScheduler.scheduleAll()
@@ -687,11 +737,14 @@ final class AppModel: ObservableObject {
                     audioOnly: audioOnly,
                     container: container
                 )
-                let label = request?.label ?? "\(variant.height)p"
+                let rawLabel = audioOnly ? "Audio" : (request?.label ?? (variant.height > 0 ? "\(variant.height)p" : ""))
+                let label = QualityLabel.display(rawLabel)
                 let bytes = request?.bytes ?? variant.size
                 LibraryStore.shared.update { state in
                     guard var record = state.videos[id] else { return }
-                    if record.qualityLabel == nil { record.qualityLabel = label }
+                    if let label, record.qualityLabel == nil || QualityLabel.display(record.qualityLabel) == nil {
+                        record.qualityLabel = label
+                    }
                     if bytes > 0 { record.bytesExpected = bytes }
                     state.videos[id] = record
                 }
