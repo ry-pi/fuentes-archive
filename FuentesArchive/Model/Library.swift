@@ -461,6 +461,40 @@ enum ArchiveTransfer {
         guard let payload = try? decoder.decode(Payload.self, from: data) else { throw TransferError.unreadable }
         return payload
     }
+
+    /// Import never treats a backup as a live transfer. A missing file drops the saved path.
+    static func imported(_ video: VideoRecord, fileOnDisk: Bool, partialOnDisk: Bool) -> VideoRecord {
+        var copy = video
+        if copy.relativePath != nil && !fileOnDisk {
+            copy.relativePath = nil
+            if copy.status == .downloaded { copy.status = .catalogued }
+        }
+        switch copy.status {
+        case .downloading, .queued, .waitingForWiFi, .paused:
+            copy.bytesPerSecond = 0
+            if copy.relativePath != nil && fileOnDisk {
+                copy.status = .downloaded
+                copy.progress = 1
+            } else if partialOnDisk {
+                copy.status = .paused
+            } else {
+                copy.status = .catalogued
+                copy.progress = 0
+                copy.bytesWritten = 0
+            }
+        default:
+            break
+        }
+        return copy
+    }
+}
+
+enum LibraryEdit {
+    static func update(_ videos: inout [String: VideoRecord], _ id: String, _ body: (inout VideoRecord) -> Void) {
+        guard var record = videos[id] else { return }
+        body(&record)
+        videos[id] = record
+    }
 }
 
 enum QualityLabel {

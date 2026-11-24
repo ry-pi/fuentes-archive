@@ -6,9 +6,8 @@ struct DownloadLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: DownloadActivityAttributes.self) { context in
             lockScreen(context.state)
-                .foregroundStyle(.white)
-                .activityBackgroundTint(Color(red: 0.05, green: 0.10, blue: 0.22))
-                .activitySystemActionForegroundColor(Color.white)
+                .activityBackgroundTint(Color.black.opacity(0.85))
+                .activitySystemActionForegroundColor(WidgetColor.gold)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -19,12 +18,12 @@ struct DownloadLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     Text("\(Int(context.state.percent * 100))%")
                         .font(.headline.monospacedDigit())
-                        .foregroundStyle(Color(red: 0.80, green: 0.12, blue: 0.18))
+                        .foregroundStyle(WidgetColor.gold)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 4) {
                         ProgressView(value: min(max(context.state.percent, 0), 1))
-                            .tint(Color(red: 0.80, green: 0.12, blue: 0.18))
+                            .tint(WidgetColor.gold)
                         Text(detail(context.state))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -49,7 +48,7 @@ struct DownloadLiveActivity: Widget {
                 .font(.headline)
                 .lineLimit(1)
             ProgressView(value: min(max(state.percent, 0), 1))
-                .tint(Color(red: 0.80, green: 0.12, blue: 0.18))
+                .tint(WidgetColor.gold)
             Text(detail(state))
                 .font(.caption)
                 .foregroundStyle(.secondary)

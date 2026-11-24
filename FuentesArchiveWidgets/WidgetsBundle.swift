@@ -43,16 +43,15 @@ struct SnapshotProvider: TimelineProvider {
 }
 
 enum WidgetColor {
-    static let background = Color(red: 0.05, green: 0.10, blue: 0.22)
-    static let gold = Color(red: 0.80, green: 0.12, blue: 0.18)
-    static let muted = Color(white: 0.86)
-    static let stripe = Color.white
+    static let background = Color(red: 0.07, green: 0.07, blue: 0.08)
+    /// Accent. This slot was gold in 1.5.0; it is red now.
+    static let gold = Color(red: 0.86, green: 0.16, blue: 0.20)
+    static let muted = Color(white: 0.62)
 }
 
 extension View {
     func archiveWidgetBackground() -> some View {
-        foregroundStyle(.white)
-            .containerBackground(WidgetColor.background, for: .widget)
+        containerBackground(WidgetColor.background, for: .widget)
     }
 }
 

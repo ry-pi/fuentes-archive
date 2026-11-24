@@ -16,6 +16,7 @@ struct FuentesArchiveApp: App {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 model.syncIfStale()
+                WidgetBridge.shared.syncActivity(force: true)
                 BackgroundScheduler.scheduleAll()
             }
         }

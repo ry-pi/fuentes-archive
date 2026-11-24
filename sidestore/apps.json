@@ -3,7 +3,7 @@
   "subtitle": "SideStore source for the unsigned build",
   "description": "Unsigned Fuentes Archive builds. The IPA is the latest GitHub Release asset. Add as a SideStore source: https://raw.githubusercontent.com/ry-pi/fuentes-archive/source/apps.json",
   "website": "https://rumble.com/c/nickjfuentes/videos",
-  "tintColor": "EDC24F",
+  "tintColor": "DB2933",
   "featuredApps": [
     "com.local.fuentesarchive"
   ],
@@ -15,9 +15,18 @@
       "subtitle": "New videos from the Rumble Videos tab",
       "localizedDescription": "Watches https://rumble.com/c/nickjfuentes/videos and saves new public uploads into the Files app. Shorts, livestreams, and the All tab are not downloaded. No App Store account and no paid signing entitlements.",
       "iconURL": "https://raw.githubusercontent.com/ry-pi/fuentes-archive/source/icon-1024.png",
-      "tintColor": "EDC24F",
+      "tintColor": "DB2933",
       "category": "entertainment",
       "versions": [
+        {
+          "version": "1.7.0",
+          "buildVersion": "8",
+          "date": "2026-11-24T12:00:00Z",
+          "localizedDescription": "Restores the dark theme with a red accent and the previous app icon. Settings is a tab. Download progress, the wide widget, Live Activity, and library import/export stay. Fixes saved-file deletion, duplicate starts, and a Live Activity that could stick after a download finished.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa",
+          "size": 2500000,
+          "minOSVersion": "17.0"
+        },
         {
           "version": "1.6.0",
           "buildVersion": "7",

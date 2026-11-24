@@ -54,21 +54,33 @@ final class AppModel: ObservableObject {
         snapshot = LibraryStore.shared.snapshot()
         LibraryStore.shared.onChange = { [weak self] in
             let apply = {
-                self?.snapshot = LibraryStore.shared.snapshot()
+                MainActor.assumeIsolated {
+                    self?.snapshot = LibraryStore.shared.snapshot()
+                }
+                WidgetBridge.shared.refreshSnapshot(force: false)
+                WidgetBridge.shared.syncActivity(force: false)
             }
             if Thread.isMainThread {
-                MainActor.assumeIsolated(apply)
+                apply()
             } else {
-                DispatchQueue.main.async { MainActor.assumeIsolated(apply) }
+                DispatchQueue.main.async(execute: apply)
             }
-            WidgetBridge.shared.refreshSnapshot(force: false)
         }
         DownloadManager.shared.onEvent = { [weak self] id, event in
-            Task { @MainActor in
-                self?.handle(id, event)
+            let work = {
+                MainActor.assumeIsolated {
+                    self?.handle(id, event)
+                }
+            }
+            if Thread.isMainThread {
+                work()
+            } else {
+                DispatchQueue.main.async(execute: work)
             }
         }
         DownloadManager.shared.reconnect()
+        WidgetBridge.shared.refreshSnapshot(force: true)
+        WidgetBridge.shared.syncActivity(force: true)
         monitor.pathUpdateHandler = { [weak self] path in
             let unmetered = path.status == .satisfied && !path.isExpensive && !path.isConstrained
             Task { @MainActor in
@@ -121,7 +133,27 @@ final class AppModel: ObservableObject {
 
     func video(_ id: String) -> VideoRecord? { snapshot.videos[id] }
 
+    func reconcileMissingFiles() {
+        let missing = snapshot.videos.values.filter { record in
+            guard record.status == .downloaded, let url = record.fileURL else { return false }
+            return !FileManager.default.fileExists(atPath: url.path)
+        }
+        guard !missing.isEmpty else { return }
+        LibraryStore.shared.update { state in
+            for record in missing {
+                LibraryEdit.update(&state.videos, record.id) { item in
+                    item.status = .catalogued
+                    item.relativePath = nil
+                    item.progress = 0
+                    item.bytesWritten = 0
+                }
+            }
+        }
+        WidgetBridge.shared.refreshSnapshot(force: true)
+    }
+
     func syncIfStale() {
+        reconcileMissingFiles()
         let last = snapshot.lastSync ?? .distantPast
         let minutes = max(15, snapshot.settings.checkIntervalMinutes)
         if Date().timeIntervalSince(last) < TimeInterval(minutes * 60), snapshot.baselineReady { return }
@@ -321,6 +353,8 @@ final class AppModel: ObservableObject {
             state.videos[id] = record
         }
         noteContinued()
+        WidgetBridge.shared.refreshSnapshot(force: true)
+        WidgetBridge.shared.syncActivity(force: true)
     }
 
     func downloadNewest(_ count: Int, automatic: Bool = false) {
@@ -347,16 +381,20 @@ final class AppModel: ObservableObject {
         }
         try? FileManager.default.removeItem(at: LibraryStore.shared.partialURL(id))
         LibraryStore.shared.update { state in
-            state.videos[id]?.status = .catalogued
-            state.videos[id]?.relativePath = nil
-            state.videos[id]?.progress = 0
-            state.videos[id]?.bytesWritten = 0
-            state.videos[id]?.segmentDone = 0
-            state.videos[id]?.segmentTotal = 0
-            state.videos[id]?.errorMessage = nil
-            state.videos[id]?.updatedAt = Date()
+            LibraryEdit.update(&state.videos, id) { record in
+                record.status = .catalogued
+                record.relativePath = nil
+                record.progress = 0
+                record.bytesWritten = 0
+                record.segmentDone = 0
+                record.segmentTotal = 0
+                record.errorMessage = nil
+                record.updatedAt = Date()
+            }
         }
         noteContinued()
+        WidgetBridge.shared.refreshSnapshot(force: true)
+        WidgetBridge.shared.syncActivity(force: true)
     }
 
     func hide(_ id: String) {
@@ -365,6 +403,7 @@ final class AppModel: ObservableObject {
             if !state.ignoredIDs.contains(id) { state.ignoredIDs.append(id) }
             state.videos[id] = nil
         }
+        WidgetBridge.shared.refreshSnapshot(force: true)
     }
 
     func restoreHidden() {
@@ -412,18 +451,16 @@ final class AppModel: ObservableObject {
             }
         }
         BackgroundScheduler.scheduleAll()
+        WidgetBridge.shared.refreshSnapshot(force: true)
+        WidgetBridge.shared.syncActivity(force: true)
     }
 
     private static func prepared(_ video: VideoRecord) -> VideoRecord {
-        var copy = video
-        if let path = copy.relativePath {
-            let url = LibraryStore.shared.fileURL(relativePath: path)
-            if !FileManager.default.fileExists(atPath: url.path) {
-                copy.relativePath = nil
-                if copy.status == .downloaded { copy.status = .catalogued }
-            }
-        }
-        return copy
+        let fileOnDisk = video.relativePath.map {
+            FileManager.default.fileExists(atPath: LibraryStore.shared.fileURL(relativePath: $0).path)
+        } ?? false
+        let partialOnDisk = FileManager.default.fileExists(atPath: LibraryStore.shared.partialURL(video.id).path)
+        return ArchiveTransfer.imported(video, fileOnDisk: fileOnDisk, partialOnDisk: partialOnDisk)
     }
 
     func updateSettings(_ body: (inout Settings) -> Void) {
@@ -687,16 +724,20 @@ final class AppModel: ObservableObject {
         let allow = !snapshot.settings.wifiOnly || onWiFi
         if !allow {
             LibraryStore.shared.update { state in
-                state.videos[id]?.status = .waitingForWiFi
-                state.videos[id]?.errorMessage = "Waiting for Wi-Fi."
+                LibraryEdit.update(&state.videos, id) { record in
+                    record.status = .waitingForWiFi
+                    record.errorMessage = "Waiting for Wi-Fi."
+                }
             }
             return
         }
         if record.status == .downloading { return }
         LibraryStore.shared.update { state in
-            state.videos[id]?.status = .downloading
-            state.videos[id]?.errorMessage = nil
-            state.videos[id]?.updatedAt = Date()
+            LibraryEdit.update(&state.videos, id) { record in
+                record.status = .downloading
+                record.errorMessage = nil
+                record.updatedAt = Date()
+            }
         }
         record.status = .downloading
         DownloadManager.shared.allowStart(id)
@@ -751,9 +792,11 @@ final class AppModel: ObservableObject {
             } catch let error as RumbleError {
                 if case .members = error {
                     LibraryStore.shared.update { state in
-                        state.videos[id]?.status = .skipped
-                        state.videos[id]?.disposition = .members
-                        state.videos[id]?.errorMessage = error.localizedDescription
+                        LibraryEdit.update(&state.videos, id) { record in
+                            record.status = .skipped
+                            record.disposition = .members
+                            record.errorMessage = error.localizedDescription
+                        }
                     }
                 } else {
                     fail(id, message: error.localizedDescription, status: nil)
@@ -800,7 +843,12 @@ final class AppModel: ObservableObject {
                 record.status = .downloaded
                 record.progress = 1
                 record.relativePath = relative
-                record.qualityLabel = quality
+                if let pretty = QualityLabel.display(quality) { record.qualityLabel = pretty }
+                let size = DiskUsage.fileBytes(url)
+                if size > 0 {
+                    record.bytesWritten = size
+                    record.bytesExpected = max(record.bytesExpected, size)
+                }
                 record.errorMessage = nil
                 record.attemptCount = 0
                 record.segmentDone = record.segmentTotal
@@ -847,7 +895,9 @@ final class AppModel: ObservableObject {
             }
         case let .failed(message, status):
             fail(id, message: message, status: status)
+            return
         }
+        WidgetBridge.shared.handle(videoID: id, event: event)
     }
 
     private func fail(_ id: String, message: String, status: Int?) {
@@ -870,6 +920,7 @@ final class AppModel: ObservableObject {
         scheduleRetries()
         pump()
         noteContinued()
+        WidgetBridge.shared.handle(videoID: id, event: .failed(message, status))
     }
 
     private func retryDue() {
@@ -896,15 +947,26 @@ final class AppModel: ObservableObject {
                 for record in self.snapshot.videos.values where record.status == .downloading {
                     if !allow {
                         if grouped[record.id] == nil {
-                            LibraryStore.shared.update { $0.videos[record.id]?.status = .waitingForWiFi }
+                            LibraryStore.shared.update { state in
+                                LibraryEdit.update(&state.videos, record.id) { item in
+                                    item.status = .waitingForWiFi
+                                    item.errorMessage = "Waiting for Wi-Fi."
+                                }
+                            }
                         }
                         continue
                     }
                     if !DownloadManager.shared.resume(videoID: record.id, allowCellular: !self.snapshot.settings.wifiOnly, adopted: grouped[record.id] ?? []) {
-                        LibraryStore.shared.update { $0.videos[record.id]?.status = .queued }
+                        LibraryStore.shared.update { state in
+                            LibraryEdit.update(&state.videos, record.id) { item in
+                                item.status = .queued
+                            }
+                        }
                     }
                 }
                 self.pump()
+                WidgetBridge.shared.refreshSnapshot(force: true)
+                WidgetBridge.shared.syncActivity(force: true)
             }
         }
     }
@@ -947,7 +1009,7 @@ final class AppModel: ObservableObject {
 }
 
 enum ArchiveSection: String, Hashable {
-    case videos, downloads, player
+    case videos, downloads, player, settings
 }
 
 enum LibrarySort: String, CaseIterable, Identifiable {

@@ -358,8 +358,13 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
             emit(note.videoID, .progress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite), totalBytesWritten, totalBytesExpectedToWrite, 0, 0))
             return
         }
+        let key = ObjectIdentifier(downloadTask)
         lock.lock()
-        liveBytes[ObjectIdentifier(downloadTask)] = totalBytesWritten
+        if handledTasks.contains(key) {
+            lock.unlock()
+            return
+        }
+        liveBytes[key] = totalBytesWritten
         lock.unlock()
         reportSegments(note.videoID)
     }
@@ -708,7 +713,8 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         }
         lock.lock()
         let live = taskNotes.reduce(Int64(0)) { sum, pair in
-            pair.value.videoID == videoID ? sum + (liveBytes[pair.key] ?? 0) : sum
+            if handledTasks.contains(pair.key) || pair.value.videoID != videoID { return sum }
+            return sum + (liveBytes[pair.key] ?? 0)
         }
         let expected = expectedTotals[videoID] ?? 0
         let total = jobs[videoID]?.segments.count ?? 0
@@ -730,7 +736,6 @@ final class DownloadManager: NSObject, URLSessionDownloadDelegate {
         let callback = onEvent
         DispatchQueue.main.async {
             callback?(id, event)
-            WidgetBridge.shared.handle(videoID: id, event: event)
         }
     }
 

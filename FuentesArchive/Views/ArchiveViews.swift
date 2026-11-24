@@ -3,13 +3,14 @@ import UIKit
 import UniformTypeIdentifiers
 
 enum Theme {
-    static let background = Color(red: 0.04, green: 0.09, blue: 0.20)
-    static let card = Color(red: 0.08, green: 0.15, blue: 0.30)
-    static let line = Color.white.opacity(0.16)
-    static let gold = Color(red: 0.80, green: 0.12, blue: 0.18)
-    static let muted = Color(white: 0.86)
-    static let danger = Color(red: 0.92, green: 0.28, blue: 0.30)
-    static let ok = Color(red: 0.78, green: 0.86, blue: 0.98)
+    static let background = Color(red: 0.055, green: 0.055, blue: 0.06)
+    static let card = Color(red: 0.11, green: 0.11, blue: 0.125)
+    static let line = Color.white.opacity(0.08)
+    /// Accent. This slot was gold in 1.5.0; it is red now.
+    static let gold = Color(red: 0.86, green: 0.16, blue: 0.20)
+    static let muted = Color(white: 0.62)
+    static let danger = Color(red: 0.90, green: 0.36, blue: 0.32)
+    static let ok = Color(red: 0.45, green: 0.74, blue: 0.52)
 }
 
 enum Format {
@@ -112,6 +113,9 @@ struct RootView: View {
             NavigationStack { PlayerTab() }
                 .tag(ArchiveSection.player)
                 .tabItem { Label("Player", systemImage: "headphones") }
+            NavigationStack { SettingsView() }
+                .tag(ArchiveSection.settings)
+                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .preferredColorScheme(.dark)
         .tint(Theme.gold)
@@ -218,12 +222,11 @@ struct LibraryView: View {
                 Image(systemName: "arrow.up.arrow.down")
             }
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
+        ToolbarItem(placement: .topBarTrailing) {
             Button { model.sync(trigger: "manual") } label: {
                 if model.syncing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
             }
             .disabled(model.syncing)
-            NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
         }
     }
 
@@ -233,23 +236,6 @@ struct LibraryView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "star.fill")
-                    .foregroundStyle(Theme.gold)
-                Text("Nicholas J. Fuentes")
-                    .font(.title2.weight(.semibold))
-                Image(systemName: "star.fill")
-                    .foregroundStyle(.white)
-            }
-            Capsule()
-                .fill(Theme.gold)
-                .frame(height: 3)
-                .overlay(alignment: .leading) {
-                    Capsule().fill(.white).frame(width: 72)
-                }
-            Text("Videos tab only · rumble.com/c/nickjfuentes/videos")
-                .font(.footnote)
-                .foregroundStyle(Theme.muted)
             if let last = model.snapshot.lastSync {
                 Text("Last successful sync \(Format.absolute(last))")
                     .font(.caption)
@@ -310,7 +296,7 @@ struct LibraryView: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .background(model.filter == item ? Theme.gold : Theme.card)
-                            .foregroundStyle(model.filter == item ? Color.black : Color.white)
+                            .foregroundStyle(Color.white)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -524,14 +510,6 @@ struct SettingsView: View {
                 Button("Write a local RSS file") { feedURL = model.exportFeed() }
                 Button("Download newest 5 now") { model.downloadNewest(5) }
                 Button("Restore hidden videos") { model.restoreHidden() }
-            }
-            Section("Channel") {
-                Text("https://rumble.com/c/nickjfuentes/videos")
-                    .font(.footnote)
-                    .textSelection(.enabled)
-                Text("Shorts, livestreams, and the All tab are not requested. Rumble does not publish an RSS feed for this channel; /feeds/c/nickjfuentes returns 410 Gone.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.muted)
             }
             Section("About") {
                 Text("Fuentes Archive \(AppVersion.current)")
@@ -1037,9 +1015,16 @@ struct DownloadsView: View {
         .safeAreaInset(edge: .bottom) {
             StorageBars(footprint: footprint)
         }
-        .onAppear { footprint = DiskUsage.current() }
+        .onAppear { reloadFootprint() }
         .onChange(of: savedSignature) { _, _ in
-            footprint = DiskUsage.current()
+            reloadFootprint()
+        }
+    }
+
+    private func reloadFootprint() {
+        Task.detached {
+            let measured = DiskUsage.current()
+            await MainActor.run { footprint = measured }
         }
     }
 

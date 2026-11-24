@@ -276,6 +276,48 @@ final class ArchiveTests: XCTestCase {
         XCTAssertEqual(QualityLabel.display("Audio only"), "Audio")
     }
 
+    func testLibraryEditWritesTheStructBack() throws {
+        let record = try sampleRecord(status: "downloaded")
+        var videos = [record.id: record]
+        LibraryEdit.update(&videos, record.id) { $0.status = .catalogued }
+        XCTAssertEqual(videos[record.id]?.status, .catalogued)
+        XCTAssertEqual(videos[record.id]?.title, "T")
+    }
+
+    func testBackupRoundTripKeepsPlaybackAndDropsMissingFiles() throws {
+        var state = LibraryState()
+        state.lastSync = Date(timeIntervalSince1970: 1_700_000_000)
+        state.settings.autoAudioOnly = true
+        state.settings.maxConcurrent = 3
+        let saved = try sampleRecord(status: "downloaded")
+        var withPlayback = saved
+        withPlayback.playbackSeconds = 42.5
+        withPlayback.relativePath = "Videos/one.mp4"
+        state.videos[saved.id] = withPlayback
+        let payload = try ArchiveTransfer.parse(try ArchiveTransfer.exportData(state))
+        XCTAssertEqual(payload.schema, 1)
+        XCTAssertEqual(payload.lastSync, state.lastSync)
+        XCTAssertTrue(payload.settings.autoAudioOnly)
+        XCTAssertEqual(payload.videos.first?.playbackSeconds, 42.5)
+        let missing = ArchiveTransfer.imported(withPlayback, fileOnDisk: false, partialOnDisk: false)
+        XCTAssertEqual(missing.status, .catalogued)
+        XCTAssertNil(missing.relativePath)
+        var active = withPlayback
+        active.status = .downloading
+        active.relativePath = nil
+        XCTAssertEqual(ArchiveTransfer.imported(active, fileOnDisk: false, partialOnDisk: true).status, .paused)
+        XCTAssertEqual(ArchiveTransfer.imported(active, fileOnDisk: false, partialOnDisk: false).status, .catalogued)
+    }
+
+    private func sampleRecord(status: String) throws -> VideoRecord {
+        let json = """
+        {"id":"1","permalink":"v1","title":"T","watchURL":"https://rumble.com/v1","disposition":"downloadable","status":"\(status)","progress":1,"bytesWritten":10,"bytesExpected":10,"attemptCount":0,"segmentTotal":0,"segmentDone":0,"updatedAt":"2026-11-11T00:00:00Z","playbackSeconds":0}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(VideoRecord.self, from: Data(json.utf8))
+    }
+
     func testBackupSchemaRejectsUnknownVersions() throws {
         let bad = Data("{\"schema\":9}".utf8)
         XCTAssertThrowsError(try ArchiveTransfer.parse(bad))

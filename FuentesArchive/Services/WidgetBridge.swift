@@ -7,14 +7,15 @@ final class WidgetBridge {
     private var lastSnapshot = Date.distantPast
     private var lastActivity = Date.distantPast
     private var wasDownloading = false
+    private var snapshotGeneration = 0
     private let thumbs = URLSession(configuration: .ephemeral)
 
     func handle(videoID: String, event: DownloadEvent) {
         switch event {
         case .finished, .failed, .paused:
-            wasDownloading = false
             refreshSnapshot(force: true)
             syncActivity(force: true)
+            wasDownloading = LibraryStore.shared.snapshot().videos.values.contains { $0.status == .downloading }
         case .progress:
             let starting = !wasDownloading
             wasDownloading = true
@@ -26,45 +27,52 @@ final class WidgetBridge {
     func refreshSnapshot(force: Bool) {
         if !force, Date().timeIntervalSince(lastSnapshot) < 8 { return }
         lastSnapshot = Date()
+        snapshotGeneration += 1
+        let generation = snapshotGeneration
         let state = LibraryStore.shared.snapshot()
-        let footprint = DiskUsage.current()
-        let saved = state.videos.values
-            .filter { $0.status == .downloaded && $0.relativePath != nil }
-            .sorted { ($0.published ?? $0.updatedAt) > ($1.published ?? $1.updatedAt) }
-        let active = state.videos.values
-            .filter { $0.status == .downloading }
-            .sorted { $0.updatedAt > $1.updatedAt }
-        let queued = state.videos.values.filter { $0.status == .queued || $0.status == .downloading }
-        let current = active.first
-        let root = AppGroup.containerURL()
-        let videos = saved.prefix(8).map { record in
-            SnapshotVideo(
-                id: record.id,
-                title: record.title,
-                published: record.published,
-                duration: record.duration,
-                isAudio: record.isAudio,
-                hasThumbnail: root.map { FileManager.default.fileExists(atPath: SnapshotStore.thumbnailURL(id: record.id, root: $0).path) } ?? false
+        DispatchQueue.global(qos: .utility).async {
+            let footprint = DiskUsage.current()
+            let saved = state.videos.values
+                .filter { $0.status == .downloaded && $0.relativePath != nil }
+                .sorted { ($0.published ?? $0.updatedAt) > ($1.published ?? $1.updatedAt) }
+            let active = state.videos.values
+                .filter { $0.status == .downloading }
+                .sorted { $0.updatedAt > $1.updatedAt }
+            let queued = state.videos.values.filter { $0.status == .queued || $0.status == .downloading }
+            let current = active.first
+            let root = AppGroup.containerURL()
+            let videos = saved.prefix(8).map { record in
+                SnapshotVideo(
+                    id: record.id,
+                    title: record.title,
+                    published: record.published,
+                    duration: record.duration,
+                    isAudio: record.isAudio,
+                    hasThumbnail: root.map { FileManager.default.fileExists(atPath: SnapshotStore.thumbnailURL(id: record.id, root: $0).path) } ?? false
+                )
+            }
+            let snapshot = ArchiveSnapshot(
+                updatedAt: Date(),
+                lastSync: state.lastSync,
+                videoCount: saved.count,
+                downloadCount: queued.count,
+                appBytes: footprint.app,
+                downloadBytes: footprint.downloads,
+                activeTitle: current?.title ?? "",
+                activePercent: current?.progress ?? 0,
+                activeBytesWritten: current?.bytesWritten ?? 0,
+                activeBytesExpected: current?.bytesExpected ?? 0,
+                activeSpeed: current?.bytesPerSecond ?? 0,
+                queueCount: queued.count,
+                videos: Array(videos)
             )
+            DispatchQueue.main.async {
+                guard generation == self.snapshotGeneration else { return }
+                SnapshotStore.save(snapshot)
+                WidgetCenter.shared.reloadAllTimelines()
+                self.fetchThumbnails(Array(saved.prefix(6)))
+            }
         }
-        let snapshot = ArchiveSnapshot(
-            updatedAt: Date(),
-            lastSync: state.lastSync,
-            videoCount: saved.count,
-            downloadCount: queued.count,
-            appBytes: footprint.app,
-            downloadBytes: footprint.downloads,
-            activeTitle: current?.title ?? "",
-            activePercent: current?.progress ?? 0,
-            activeBytesWritten: current?.bytesWritten ?? 0,
-            activeBytesExpected: current?.bytesExpected ?? 0,
-            activeSpeed: current?.bytesPerSecond ?? 0,
-            queueCount: queued.count,
-            videos: Array(videos)
-        )
-        SnapshotStore.save(snapshot)
-        WidgetCenter.shared.reloadAllTimelines()
-        fetchThumbnails(Array(saved.prefix(6)))
     }
 
     func syncActivity(force: Bool) {
@@ -123,11 +131,11 @@ enum LiveDownloadActivity {
 
     static func sync(videoID: String, state: DownloadActivityAttributes.ContentState) {
         last = state
-        if current == nil {
-            current = Activity<DownloadActivityAttributes>.activities.first
+        if current == nil || current?.activityState != .active {
+            current = Activity<DownloadActivityAttributes>.activities.first { $0.activityState == .active }
         }
         let content = ActivityContent(state: state, staleDate: nil)
-        if let current {
+        if let current, current.activityState == .active {
             Task { await current.update(content) }
             return
         }
@@ -144,11 +152,12 @@ enum LiveDownloadActivity {
     }
 
     static func end() {
-        guard let activity = current ?? Activity<DownloadActivityAttributes>.activities.first else { return }
-        let state = last
+        let activities = Activity<DownloadActivityAttributes>.activities
         current = nil
-        Task {
-            await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .immediate)
+        guard !activities.isEmpty else { return }
+        let state = last
+        for activity in activities {
+            Task { await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .immediate) }
         }
         DebugLog.event("live activity ended")
     }
