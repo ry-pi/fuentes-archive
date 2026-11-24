@@ -67,9 +67,9 @@ final class AppModel: ObservableObject {
             }
         }
         DownloadManager.shared.onEvent = { [weak self] id, event in
-            let work = {
+            let work: () -> Void = {
                 MainActor.assumeIsolated {
-                    self?.handle(id, event)
+                    _ = self?.handle(id, event)
                 }
             }
             if Thread.isMainThread {
