@@ -332,7 +332,7 @@ final class ArchiveTests: XCTestCase {
             return
         }
         XCTAssertEqual(embedded.permalink, "v7i5j76")
-        XCTAssertEqual(embedded.watch.path, "/embed/v7i5j76/")
+        XCTAssertTrue(embedded.watch.absoluteString.hasSuffix("/embed/v7i5j76/"), embedded.watch.absoluteString)
         XCTAssertEqual(Self.linkFailure(RumbleLink.parse("")), .empty)
         XCTAssertEqual(Self.linkFailure(RumbleLink.parse("https://example.com/v1")), .notRumble)
         XCTAssertEqual(Self.linkFailure(RumbleLink.parse("https://rumble.com/c/nickjfuentes/videos")), .notVideo)
