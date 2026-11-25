@@ -85,9 +85,11 @@ struct PlayerLayerHost: UIViewRepresentable {
         return view
     }
 
+    var automatic: Bool
+
     func updateUIView(_ view: PlayerLayerView, context: Context) {
         view.playerLayer.player = player
-        pip.attach(layer: view.playerLayer)
+        pip.attach(layer: view.playerLayer, automatic: automatic)
     }
 }
 
@@ -194,6 +196,17 @@ struct ArchivePlayer: View {
             }
             engine.start()
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard !model.settings.backgroundAudio, !engine.pip.active else { return }
+            if phase == .background {
+                engine.setBackgroundHold(true)
+            } else if phase == .active {
+                engine.setBackgroundHold(false)
+            }
+        }
+        .onChange(of: model.settings.backgroundAudio) { _, enabled in
+            engine.applyBackgroundPolicy(enabled)
+        }
         .onDisappear {
             engine.interfaceVisible = false
             if scenePhase == .active, !engine.pip.active {
@@ -214,7 +227,11 @@ struct ArchivePlayer: View {
     private var videoBody: some View {
         VStack(spacing: 16) {
             ZStack(alignment: .top) {
-                PlayerLayerHost(player: engine.player, pip: engine.pip)
+                PlayerLayerHost(
+                    player: engine.player,
+                    pip: engine.pip,
+                    automatic: model.settings.backgroundAudio && model.settings.autoPictureInPicture
+                )
                     .background(.black)
                 HStack {
                     PiPButton(pip: engine.pip)
@@ -250,13 +267,13 @@ struct ArchivePlayer: View {
             .font(.caption.monospacedDigit())
             .foregroundStyle(Theme.muted)
             HStack(spacing: 28) {
-                Button { engine.skip(-15) } label: { Image(systemName: "gobackward.15").font(.title2) }
+                Button { engine.skip(-engine.skipAmount) } label: { Image(systemName: skipSymbol(seconds: model.settings.skipSeconds, forward: false)).font(.title2) }
                 Button { engine.toggle() } label: {
                     Image(systemName: engine.playing ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 56))
                         .foregroundStyle(Theme.gold)
                 }
-                Button { engine.skip(15) } label: { Image(systemName: "goforward.15").font(.title2) }
+                Button { engine.skip(engine.skipAmount) } label: { Image(systemName: skipSymbol(seconds: model.settings.skipSeconds, forward: true)).font(.title2) }
             }
             .buttonStyle(.plain)
         }
@@ -305,13 +322,13 @@ struct ArchivePlayer: View {
                 .foregroundStyle(Theme.muted)
             }
             HStack(spacing: 28) {
-                Button { engine.skip(-15) } label: { Image(systemName: "gobackward.15").font(.title2) }
+                Button { engine.skip(-engine.skipAmount) } label: { Image(systemName: skipSymbol(seconds: model.settings.skipSeconds, forward: false)).font(.title2) }
                 Button { engine.toggle() } label: {
                     Image(systemName: engine.playing ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 64))
                         .foregroundStyle(Theme.gold)
                 }
-                Button { engine.skip(15) } label: { Image(systemName: "goforward.15").font(.title2) }
+                Button { engine.skip(engine.skipAmount) } label: { Image(systemName: skipSymbol(seconds: model.settings.skipSeconds, forward: true)).font(.title2) }
             }
             .buttonStyle(.plain)
             Spacer()
@@ -338,5 +355,13 @@ struct ArchivePlayer: View {
         if abs(speed - 1) < 0.01 { return "1x" }
         if abs(speed - 2) < 0.01 { return "2x" }
         return String(format: "%.2fx", speed)
+    }
+
+    private func skipSymbol(seconds: Int, forward: Bool) -> String {
+        let base = forward ? "goforward" : "gobackward"
+        switch seconds {
+        case 10, 15, 30: return "\(base).\(seconds)"
+        default: return base
+        }
     }
 }

@@ -365,6 +365,38 @@ final class ArchiveTests: XCTestCase {
         XCTAssertFalse(remove.contains(manual.id))
     }
 
+    func testPlaybackSettingsSurviveExportAndOldBackups() throws {
+        let old = try JSONDecoder().decode(Settings.self, from: Data("{\"wifiOnly\":false}".utf8))
+        XCTAssertFalse(old.wifiOnly)
+        XCTAssertTrue(old.backgroundAudio)
+        XCTAssertTrue(old.autoPictureInPicture)
+        XCTAssertEqual(old.skipSeconds, 15)
+        XCTAssertTrue(old.pauseOnDisconnect)
+        XCTAssertTrue(old.resumeAfterInterruption)
+        XCTAssertTrue(old.rememberPlayback)
+        XCTAssertEqual(old.playbackSpeed, 1)
+        var changed = old
+        changed.backgroundAudio = false
+        changed.autoPictureInPicture = false
+        changed.skipSeconds = 30
+        changed.pauseOnDisconnect = false
+        changed.resumeAfterInterruption = false
+        changed.rememberPlayback = false
+        changed.playbackSpeed = 1.5
+        let data = try JSONEncoder().encode(changed)
+        let again = try JSONDecoder().decode(Settings.self, from: data)
+        XCTAssertFalse(again.backgroundAudio)
+        XCTAssertFalse(again.autoPictureInPicture)
+        XCTAssertEqual(again.skipSeconds, 30)
+        XCTAssertFalse(again.pauseOnDisconnect)
+        XCTAssertFalse(again.resumeAfterInterruption)
+        XCTAssertFalse(again.rememberPlayback)
+        XCTAssertEqual(again.playbackSpeed, 1.5)
+        let odd = try JSONDecoder().decode(Settings.self, from: Data("{\"skipSeconds\":7,\"playbackSpeed\":9}".utf8))
+        XCTAssertEqual(odd.skipSeconds, 15)
+        XCTAssertEqual(odd.playbackSpeed, 1)
+    }
+
     func testBackupSchemaRejectsUnknownVersions() throws {
         let bad = Data("{\"schema\":9}".utf8)
         XCTAssertThrowsError(try ArchiveTransfer.parse(bad))

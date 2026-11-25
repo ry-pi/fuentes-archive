@@ -233,6 +233,7 @@ final class AppModel: ObservableObject {
     }
 
     func rememberPlayback(_ id: String, seconds: Double) {
+        guard snapshot.settings.rememberPlayback else { return }
         LibraryStore.shared.update { state in
             guard var record = state.videos[id] else { return }
             record.playbackSeconds = seconds
@@ -457,6 +458,7 @@ final class AppModel: ObservableObject {
 
     func updateSettings(_ body: (inout Settings) -> Void) {
         LibraryStore.shared.update { body(&$0.settings) }
+        NowPlayingController.shared.applySkip(snapshot.settings.skipSeconds)
         BackgroundScheduler.scheduleAll()
         if snapshot.settings.wifiOnly && pathReady && !onWiFi {
             pauseForNetwork()

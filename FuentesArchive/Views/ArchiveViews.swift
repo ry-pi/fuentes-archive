@@ -488,45 +488,122 @@ struct SettingsView: View {
     @State private var confirmImport = false
     @State private var importError: String?
     @State private var settingsQuery = ""
+    @State private var confirmRestore = false
+    @State private var confirmDeleteAll = false
 
     var body: some View {
         Form {
-            if shows("Downloads") || shows("Auto-Download") || shows("Photos") {
-                Section("Downloads") {
-                    NavigationLink("Auto-Download") { AutoDownloadSettings() }
+            if shows("Downloads", "Auto-download", "Photos", "Newest") {
+                Section {
+                    NavigationLink("Auto-download") { AutoDownloadSettings() }
                     Toggle("Save a copy to Photos", isOn: binding(\.saveToPhotos))
+                    Button("Download newest 5") { model.downloadNewest(5) }
+                } header: {
+                    Text("Downloads")
+                } footer: {
+                    Text("Auto-download controls the schedule, quality, and network. Photos gets a copy only after a file finishes.")
                 }
             }
-            if shows("Export") || shows("Import") {
+            if shows("Playback", "Background", "Picture", "Skip", "Headphones", "Interrupt", "Position", "Speed") {
+                Section {
+                    Toggle("Background audio", isOn: binding(\.backgroundAudio))
+                    Toggle("Picture in Picture", isOn: binding(\.autoPictureInPicture))
+                        .disabled(!model.settings.backgroundAudio)
+                    Picker("Skip interval", selection: binding(\.skipSeconds)) {
+                        Text("10 seconds").tag(10 as Int)
+                        Text("15 seconds").tag(15 as Int)
+                        Text("30 seconds").tag(30 as Int)
+                    }
+                    Toggle("Pause when headphones disconnect", isOn: binding(\.pauseOnDisconnect))
+                    Toggle("Resume after interruptions", isOn: binding(\.resumeAfterInterruption))
+                    Toggle("Remember playback position", isOn: binding(\.rememberPlayback))
+                    Picker("Default speed", selection: binding(\.playbackSpeed)) {
+                        Text("1×").tag(1.0 as Double)
+                        Text("1.25×").tag(1.25 as Double)
+                        Text("1.5×").tag(1.5 as Double)
+                        Text("2×").tag(2.0 as Double)
+                    }
+                } header: {
+                    Text("Playback")
+                } footer: {
+                    Text("Background audio keeps the player going with the screen locked. Picture in Picture starts on its own when you leave during a video, and only while background audio is on. Skip applies in the player and on the lock screen. Default speed is used the next time a video opens.")
+                }
+            }
+            if shows("Storage", "Saved", "Delete", "Watching", "Cap") {
+                Section {
+                    LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
+                    NavigationLink("Storage") { StorageView() }
+                    Toggle("Delete after watching", isOn: binding(\.deleteWatched))
+                    Stepper(value: binding(\.deleteAfterDays), in: 0...365) {
+                        Text(model.settings.deleteAfterDays == 0 ? "Keep files regardless of age" : "Delete files older than \(model.settings.deleteAfterDays) days")
+                    }
+                    Picker("Storage cap", selection: binding(\.storageCapGB)) {
+                        Text("Off").tag(0)
+                        Text("5 GB").tag(5)
+                        Text("10 GB").tag(10)
+                        Text("25 GB").tag(25)
+                        Text("50 GB").tag(50)
+                    }
+                } header: {
+                    Text("Storage")
+                } footer: {
+                    Text("Watched, age, and cap rules do not remove videos you added from a link.")
+                }
+            }
+            if shows("Notifications", "Live", "Finishes", "Starts") {
+                Section {
+                    Toggle("When a download starts", isOn: binding(\.notifyOnNew))
+                    Toggle("When a download finishes", isOn: binding(\.notify))
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("The Live Activity stays on the lock screen while a download is active and closes when it finishes.")
+                }
+            }
+            if shows("Widgets", "Gallery", "Activity") {
+                Section {
+                    LabeledContent("Live Activity", value: "While downloading")
+                    LabeledContent("Home screen", value: "Widget gallery")
+                } header: {
+                    Text("Widgets")
+                } footer: {
+                    Text("Widgets and the Live Activity use the same progress as the Downloads tab. They refresh when a download starts, advances, and finishes.")
+                }
+            }
+            if shows("Data", "Export", "Import", "RSS") {
                 Section {
                     Button("Export library data") {
                         exportFile = ArchiveFile(data: model.exportData())
                         exporting = true
                     }
                     Button("Import library data") { importing = true }
+                    Button("Write a local RSS file") { feedURL = model.exportFeed() }
                 } header: {
-                    Text("Export / Import")
+                    Text("Data")
                 } footer: {
-                    Text("The file keeps settings, playback positions, and video metadata. It does not include the video or audio files.")
+                    Text("Export and import keep settings, playback positions, and video metadata. They do not include the media files.")
                 }
             }
-            if shows("Library") || shows("Storage") || shows("Debug") || shows("Background") || shows("log") || shows("RSS") || shows("hidden") {
-                Section("Library") {
-                    LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
-                    NavigationLink("Storage") { StorageView() }
+            if shows("About", "Version", "Files", "Log", "Debug") {
+                Section {
+                    LabeledContent("Version", value: AppVersion.current)
+                    LabeledContent("Files", value: "On My iPhone")
                     NavigationLink("Background refresh log") { RefreshLogView() }
                     NavigationLink("Debug log") { DebugLogView() }
-                    Button("Write a local RSS file") { feedURL = model.exportFeed() }
-                    Button("Download newest 5 now") { model.downloadNewest(5) }
-                    Button("Restore hidden videos") { model.restoreHidden() }
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("Finished files are in On My iPhone → Fuentes Archive. iOS decides when a background refresh actually runs.")
                 }
             }
-            if shows("About") {
-                Section("About") {
-                    Text("Fuentes Archive \(AppVersion.current)")
-                    Text("Files land in On My iPhone → Fuentes Archive. iOS decides when background refresh actually runs.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.muted)
+            if shows("Restore", "Hidden", "Delete") {
+                Section {
+                    Button("Restore hidden videos", role: .destructive) { confirmRestore = true }
+                    Button("Delete all saved files", role: .destructive) { confirmDeleteAll = true }
+                } header: {
+                    Text("Danger zone")
+                } footer: {
+                    Text("Restore puts hidden titles back in the list. Delete removes the media files and leaves the list so you can download them again.")
                 }
             }
         }
@@ -581,11 +658,24 @@ struct SettingsView: View {
         } message: {
             Text(importError ?? "")
         }
+        .alert("Restore hidden videos?", isPresented: $confirmRestore) {
+            Button("Restore", role: .destructive) { model.restoreHidden() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Hidden titles return to the Videos tab. This does not download them.")
+        }
+        .alert("Delete every saved file?", isPresented: $confirmDeleteAll) {
+            Button("Delete files", role: .destructive) { model.deleteAllFiles() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The video list stays. You can download them again.")
+        }
     }
 
-    private func shows(_ text: String) -> Bool {
+    private func shows(_ words: String...) -> Bool {
         let needle = settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        return needle.isEmpty || text.localizedCaseInsensitiveContains(needle)
+        if needle.isEmpty { return true }
+        return words.contains { $0.localizedCaseInsensitiveContains(needle) }
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<Settings, Value>) -> Binding<Value> {
@@ -611,10 +701,12 @@ struct AutoDownloadSettings: View {
                     Text("6 hours").tag(360)
                     Text("12 hours").tag(720)
                 }
+            } header: {
+                Text("Schedule")
             } footer: {
                 Text("The interval is the earliest iOS may run a background check. It often waits longer.")
             }
-            Section("What to save") {
+            Section {
                 Picker("Quality", selection: binding(\.quality)) {
                     ForEach(Quality.allCases) { quality in
                         Text(quality.label).tag(quality)
@@ -628,8 +720,10 @@ struct AutoDownloadSettings: View {
                 Stepper(value: binding(\.backfillCount), in: 0...25) {
                     Text("On first sync, also download newest \(model.settings.backfillCount)")
                 }
+            } header: {
+                Text("What to save")
             }
-            Section("Which new videos") {
+            Section {
                 Toggle("Only videos after a date", isOn: dateEnabled)
                 if model.settings.autoNewerThan != nil {
                     DatePicker(
@@ -644,23 +738,8 @@ struct AutoDownloadSettings: View {
                 Stepper(value: binding(\.maxConcurrent), in: 1...4) {
                     Text("At once: \(model.settings.maxConcurrent)")
                 }
-            }
-            Section("Cleanup") {
-                Toggle("Delete after watching", isOn: binding(\.deleteWatched))
-                Stepper(value: binding(\.deleteAfterDays), in: 0...365) {
-                    Text(model.settings.deleteAfterDays == 0 ? "Do not delete by age" : "Delete files older than \(model.settings.deleteAfterDays) days")
-                }
-                Picker("Storage cap", selection: binding(\.storageCapGB)) {
-                    Text("Off").tag(0)
-                    Text("5 GB").tag(5)
-                    Text("10 GB").tag(10)
-                    Text("25 GB").tag(25)
-                    Text("50 GB").tag(50)
-                }
-            }
-            Section("Notifications") {
-                Toggle("When a new download starts", isOn: binding(\.notifyOnNew))
-                Toggle("When a download finishes", isOn: binding(\.notify))
+            } header: {
+                Text("Which new videos")
             }
         }
         .scrollContentBackground(.hidden)
@@ -715,15 +794,17 @@ struct ArchiveFile: FileDocument {
 
 struct StorageView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var confirm = false
 
     var body: some View {
         List {
             Section {
                 LabeledContent("Used", value: Format.bytes(model.storageBytes()))
-                Button("Delete all saved files", role: .destructive) { confirm = true }
+            } header: {
+                Text("Files")
+            } footer: {
+                Text("Delete every saved file from Settings. Swipe a row here to delete one file.")
             }
-            Section("Files") {
+            Section {
                 let saved = model.videos().filter { $0.relativePath != nil }
                 if saved.isEmpty {
                     Text("Nothing saved yet.")
@@ -746,11 +827,7 @@ struct StorageView: View {
             }
         }
         .navigationTitle("Storage")
-        .confirmationDialog("Delete every file in the archive?", isPresented: $confirm, titleVisibility: .visible) {
-            Button("Delete files", role: .destructive) { model.deleteAllFiles() }
-        } message: {
-            Text("The video list stays. You can download them again.")
-        }
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

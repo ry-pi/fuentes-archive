@@ -218,11 +218,20 @@ struct Settings: Codable, Equatable {
     var deleteAfterDays: Int = 0
     var storageCapGB: Int = 0
     var notifyOnNew: Bool = true
+    var backgroundAudio: Bool = true
+    var autoPictureInPicture: Bool = true
+    var skipSeconds: Int = 15
+    var pauseOnDisconnect: Bool = true
+    var resumeAfterInterruption: Bool = true
+    var rememberPlayback: Bool = true
+    var playbackSpeed: Double = 1
 
     enum CodingKeys: String, CodingKey {
         case autoDownload, wifiOnly, quality, saveToPhotos, notify, maxPages, backfillCount, dismissedIntro, verboseLog
         case checkIntervalMinutes, autoAudioOnly, autoNewerThan, autoNewestCount, maxConcurrent
         case deleteWatched, deleteAfterDays, storageCapGB, notifyOnNew
+        case backgroundAudio, autoPictureInPicture, skipSeconds, pauseOnDisconnect
+        case resumeAfterInterruption, rememberPlayback, playbackSpeed
     }
 
     init() {}
@@ -247,6 +256,15 @@ struct Settings: Codable, Equatable {
         deleteAfterDays = try container.decodeIfPresent(Int.self, forKey: .deleteAfterDays) ?? 0
         storageCapGB = try container.decodeIfPresent(Int.self, forKey: .storageCapGB) ?? 0
         notifyOnNew = try container.decodeIfPresent(Bool.self, forKey: .notifyOnNew) ?? true
+        backgroundAudio = try container.decodeIfPresent(Bool.self, forKey: .backgroundAudio) ?? true
+        autoPictureInPicture = try container.decodeIfPresent(Bool.self, forKey: .autoPictureInPicture) ?? true
+        let storedSkip = try container.decodeIfPresent(Int.self, forKey: .skipSeconds) ?? 15
+        skipSeconds = [10, 15, 30].contains(storedSkip) ? storedSkip : 15
+        pauseOnDisconnect = try container.decodeIfPresent(Bool.self, forKey: .pauseOnDisconnect) ?? true
+        resumeAfterInterruption = try container.decodeIfPresent(Bool.self, forKey: .resumeAfterInterruption) ?? true
+        rememberPlayback = try container.decodeIfPresent(Bool.self, forKey: .rememberPlayback) ?? true
+        let storedSpeed = try container.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1
+        playbackSpeed = [1, 1.25, 1.5, 2].contains(storedSpeed) ? storedSpeed : 1
     }
 
     func encode(to encoder: Encoder) throws {
@@ -269,6 +287,13 @@ struct Settings: Codable, Equatable {
         try container.encode(deleteAfterDays, forKey: .deleteAfterDays)
         try container.encode(storageCapGB, forKey: .storageCapGB)
         try container.encode(notifyOnNew, forKey: .notifyOnNew)
+        try container.encode(backgroundAudio, forKey: .backgroundAudio)
+        try container.encode(autoPictureInPicture, forKey: .autoPictureInPicture)
+        try container.encode(skipSeconds, forKey: .skipSeconds)
+        try container.encode(pauseOnDisconnect, forKey: .pauseOnDisconnect)
+        try container.encode(resumeAfterInterruption, forKey: .resumeAfterInterruption)
+        try container.encode(rememberPlayback, forKey: .rememberPlayback)
+        try container.encode(playbackSpeed, forKey: .playbackSpeed)
     }
 }
 

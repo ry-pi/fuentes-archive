@@ -82,13 +82,24 @@ final class NowPlayingController {
     var onPause: (() -> Void)?
     var onSkip: ((Double) -> Void)?
     var onSeek: ((Double) -> Void)?
+    private(set) var skipSeconds: Double = 15
 
     func attach(player: AVPlayer, title: String) {
         self.player = player
         self.title = title
         install()
         setCommands(enabled: true)
+        applySkip(Int(skipSeconds))
         refresh()
+    }
+
+    func applySkip(_ seconds: Int) {
+        let chosen = [10, 15, 30].contains(seconds) ? seconds : 15
+        skipSeconds = Double(chosen)
+        let numbers = [NSNumber(value: chosen)]
+        let center = MPRemoteCommandCenter.shared()
+        center.skipForwardCommand.preferredIntervals = numbers
+        center.skipBackwardCommand.preferredIntervals = numbers
     }
 
     func setArtwork(_ image: UIImage) {
@@ -131,8 +142,7 @@ final class NowPlayingController {
         guard !installed else { return }
         installed = true
         let center = MPRemoteCommandCenter.shared()
-        center.skipForwardCommand.preferredIntervals = [15]
-        center.skipBackwardCommand.preferredIntervals = [15]
+        applySkip(Int(skipSeconds))
         center.playCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
             let play = self.onPlay
@@ -151,17 +161,19 @@ final class NowPlayingController {
         }
         center.skipForwardCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
+            let seconds = self.skipSeconds
             let skip = self.onSkip
             DispatchQueue.main.async {
-                if let skip { skip(15) }
+                if let skip { skip(seconds) }
             }
             return .success
         }
         center.skipBackwardCommand.addTarget { [weak self] _ in
             guard let self else { return .commandFailed }
+            let seconds = self.skipSeconds
             let skip = self.onSkip
             DispatchQueue.main.async {
-                if let skip { skip(-15) }
+                if let skip { skip(-seconds) }
             }
             return .success
         }
@@ -193,8 +205,9 @@ final class PiPController: NSObject, ObservableObject, AVPictureInPictureControl
     var onRestore: (() -> Void)?
     var onStop: (() -> Void)?
 
-    func attach(layer: AVPlayerLayer) {
+    func attach(layer: AVPlayerLayer, automatic: Bool) {
         if pip?.playerLayer === layer {
+            pip?.canStartPictureInPictureAutomaticallyFromInline = automatic
             possible = pip?.isPictureInPicturePossible ?? false
             return
         }
@@ -206,7 +219,7 @@ final class PiPController: NSObject, ObservableObject, AVPictureInPictureControl
             return
         }
         controller.delegate = self
-        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = automatic
         pip = controller
         possible = controller.isPictureInPicturePossible
     }
@@ -273,13 +286,17 @@ final class PlayingItem: ObservableObject {
         self.title = title
         self.audioOnly = audioOnly
         self.artworkURL = artworkURL
+        let settings = AppModel.shared.settings
+        let rate = Float(settings.playbackSpeed)
+        let startAt = settings.rememberPlayback ? resume : 0
         let item = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: item)
         player.volume = 1
         player.isMuted = false
-        player.defaultRate = 1
-        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-        current = resume
+        speed = rate
+        player.defaultRate = rate
+        player.audiovisualBackgroundPlaybackPolicy = settings.backgroundAudio ? .continuesIfPossible : .pauses
+        current = startAt
     }
 
     func start() {
@@ -323,6 +340,7 @@ final class PlayingItem: ObservableObject {
             self.seek(seconds)
         }
         remote.attach(player: player, title: title)
+        remote.applySkip(AppModel.shared.settings.skipSeconds)
         loadArtwork()
         Task { await logTracks() }
     }
@@ -361,16 +379,35 @@ final class PlayingItem: ObservableObject {
         NowPlayingController.shared.refresh()
     }
 
+    var skipAmount: Double { Double(AppModel.shared.settings.skipSeconds) }
+
+    func applyBackgroundPolicy(_ enabled: Bool) {
+        player.audiovisualBackgroundPlaybackPolicy = enabled ? .continuesIfPossible : .pauses
+    }
+
     func toggle() {
         if playing {
             player.pause()
             playing = false
         } else {
+            PlaybackSession.activate(audioOnly: audioOnly)
             player.play()
             player.rate = speed
             playing = true
         }
         NowPlayingController.shared.refresh()
+    }
+
+    func setBackgroundHold(_ held: Bool) {
+        if held {
+            pauseFromRemote()
+            acceptingRemote = false
+            PlaybackSession.deactivate()
+            return
+        }
+        guard started else { return }
+        acceptingRemote = true
+        PlaybackSession.activate(audioOnly: audioOnly)
     }
 
     func skip(_ delta: Double) {
@@ -443,7 +480,8 @@ final class PlayingItem: ObservableObject {
                     self.resumeAfterInterruption = self.playing
                     self.pauseFromRemote()
                 } else if type == .ended {
-                    if options.contains(.shouldResume), self.resumeAfterInterruption {
+                    let shouldResume = AppModel.shared.settings.resumeAfterInterruption && options.contains(.shouldResume)
+                    if shouldResume, self.resumeAfterInterruption {
                         self.playFromRemote()
                     }
                     self.resumeAfterInterruption = false
@@ -454,7 +492,7 @@ final class PlayingItem: ObservableObject {
             let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
             Task { @MainActor in
                 guard let self, let reasonRaw, let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
-                if reason == .oldDeviceUnavailable {
+                if reason == .oldDeviceUnavailable, AppModel.shared.settings.pauseOnDisconnect {
                     self.pauseFromRemote()
                 }
             }
