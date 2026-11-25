@@ -16,6 +16,15 @@ enum StreamResolver {
         return HTMLScanner.firstCapture(#"/embed/([0-9a-zA-Z]+)"#, in: html)
     }
 
+    static func remoteVideo(from payload: [String: Any], watch: URL) -> RemoteVideo? {
+        guard let embed = embedID(fromOEmbed: payload) else { return nil }
+        let rawTitle = (payload["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = rawTitle.isEmpty ? "Rumble video" : rawTitle
+        let author = payload["author_name"] as? String
+        let thumb = payload["thumbnail_url"] as? String
+        return RemoteVideo(embedID: embed, title: title, author: author, thumbnail: thumb, watch: watch)
+    }
+
     /// The embed page assigns `p.f["id"] = {... ,loaded:v()}`. `loaded:v()` is script, not JSON.
     static func playerObject(from html: String) -> [String: Any]? {
         let pattern = #"p\.f\[[^\]]+\]\s*=\s*\{"#

@@ -53,7 +53,7 @@ final class AppModel: ObservableObject {
     private init() {
         snapshot = LibraryStore.shared.snapshot()
         LibraryStore.shared.onChange = { [weak self] in
-            let apply = {
+            let apply: () -> Void = {
                 MainActor.assumeIsolated {
                     self?.snapshot = LibraryStore.shared.snapshot()
                 }
@@ -120,15 +120,7 @@ final class AppModel: ObservableObject {
         case .waiting: items = items.filter { $0.status == .waiting || $0.status == .waitingForWiFi || $0.status == .skipped }
         case .notSaved: items = items.filter { $0.status != .downloaded }
         }
-        switch sort {
-        case .newest: items.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
-        case .oldest: items.sort { ($0.published ?? .distantFuture) < ($1.published ?? .distantFuture) }
-        case .title: items.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        case .duration: items.sort { ($0.duration ?? 0) > ($1.duration ?? 0) }
-        case .size: items.sort { ($0.bytesExpected) > ($1.bytesExpected) }
-        case .status: items.sort { $0.status.rawValue < $1.status.rawValue }
-        }
-        return items
+        return LibrarySort.ordered(items, sort)
     }
 
     func video(_ id: String) -> VideoRecord? { snapshot.videos[id] }
@@ -246,7 +238,7 @@ final class AppModel: ObservableObject {
             record.playbackSeconds = seconds
             state.videos[id] = record
         }
-        guard snapshot.settings.deleteWatched, let record = snapshot.videos[id], let duration = record.duration, duration > 30 else { return }
+        guard snapshot.settings.deleteWatched, let record = snapshot.videos[id], !record.manuallyAdded, let duration = record.duration, duration > 30 else { return }
         if seconds >= duration * 0.9 {
             deleteFile(id)
         }
@@ -514,7 +506,7 @@ final class AppModel: ObservableObject {
         var pageURL = Channel.videosPage
         var maxPublished: Date?
         let pageLimit = min(10, max(1, snapshot.settings.maxPages))
-        let known = Set(snapshot.knownIDs)
+        var known = Set(snapshot.knownIDs)
         do {
             var pages: [[ListedVideo]] = []
             while pages.count < pageLimit {
@@ -528,6 +520,11 @@ final class AppModel: ObservableObject {
                 if page.items.allSatisfy({ seen.contains($0.id) }) { break }
                 guard let next = page.nextURL else { break }
                 pageURL = next
+            }
+            for item in pages.flatMap({ $0 }) {
+                if ArchiveMatch.existingID(in: snapshot.videos, id: item.id, permalink: item.permalink, watch: item.watch) != nil {
+                    known.insert(item.id)
+                }
             }
             let decision = AutoQueue.plan(
                 pages: pages.map { $0.map { SyncVideo(id: $0.id, disposition: $0.disposition) } },
@@ -580,7 +577,8 @@ final class AppModel: ObservableObject {
 
     private func upsert(_ item: ListedVideo) {
         LibraryStore.shared.update { state in
-            var record = state.videos[item.id] ?? VideoRecord(
+            let matched = ArchiveMatch.existingID(in: state.videos, id: item.id, permalink: item.permalink, watch: item.watch)
+            var record = matched.flatMap { state.videos[$0] } ?? VideoRecord(
                 id: item.id,
                 permalink: item.permalink,
                 title: item.title,
@@ -612,14 +610,25 @@ final class AppModel: ObservableObject {
             record.duration = item.duration ?? record.duration
             record.views = item.views ?? record.views
             record.channelName = item.channel ?? record.channelName
-            record.disposition = item.disposition
-            if record.status == .catalogued || record.status == .waiting || record.status == .skipped {
-                record.status = status(for: item.disposition)
+            if !record.manuallyAdded {
+                record.disposition = item.disposition
+                if record.status == .catalogued || record.status == .waiting || record.status == .skipped {
+                    record.status = status(for: item.disposition)
+                }
             }
             record.updatedAt = Date()
-            state.videos[item.id] = record
+            state.videos[record.id] = record
+            if record.id != item.id {
+                state.videos[item.id] = nil
+            }
             if !state.knownIDs.contains(item.id) {
                 state.knownIDs.append(item.id)
+            }
+            if !state.knownIDs.contains(record.id) {
+                state.knownIDs.append(record.id)
+            }
+            if !state.knownIDs.contains(item.permalink) {
+                state.knownIDs.append(item.permalink)
             }
         }
     }
@@ -643,6 +652,7 @@ final class AppModel: ObservableObject {
             newestCount: snapshot.settings.autoNewestCount
         )
         for id in chosen {
+            guard snapshot.videos[id] != nil else { continue }
             let title = snapshot.videos[id]?.title ?? "New video"
             download(id, automatic: true)
             if snapshot.settings.notifyOnNew {
@@ -654,28 +664,14 @@ final class AppModel: ObservableObject {
     private func enforceRetention() {
         let settings = snapshot.settings
         let now = Date()
-        var remove: [String] = []
-        let saved = snapshot.videos.values.filter { $0.status == .downloaded && $0.relativePath != nil }
-        for record in saved {
-            let watched = record.duration.map { duration in duration > 30 && record.playbackSeconds >= duration * 0.9 } ?? false
-            if settings.deleteWatched && watched {
-                remove.append(record.id)
-                continue
-            }
-            if settings.deleteAfterDays > 0 {
-                let age = now.timeIntervalSince(record.updatedAt)
-                if age > Double(settings.deleteAfterDays) * 86_400 {
-                    remove.append(record.id)
-                }
-            }
-        }
+        let remove = Retention.removable(Array(snapshot.videos.values), settings: settings, now: now)
         for id in remove { deleteFile(id) }
         guard settings.storageCapGB > 0 else { return }
         let cap = Int64(settings.storageCapGB) * 1024 * 1024 * 1024
         var used = DiskUsage.current().downloads
         if used <= cap { return }
         let oldest = snapshot.videos.values
-            .filter { $0.status == .downloaded && $0.relativePath != nil && !remove.contains($0.id) }
+            .filter { $0.status == .downloaded && $0.relativePath != nil && !$0.manuallyAdded && !remove.contains($0.id) }
             .sorted { $0.updatedAt < $1.updatedAt }
         for record in oldest {
             if used <= cap { break }
@@ -1006,6 +1002,71 @@ final class AppModel: ObservableObject {
             state.log.append(LogEntry(id: UUID().uuidString, date: Date(), source: source, message: message, level: level))
         }
     }
+
+    func addLink(_ raw: String) async -> String? {
+        let parsed: RumbleLink.Parsed
+        switch RumbleLink.parse(raw) {
+        case let .failure(error):
+            return error.localizedDescription
+        case let .success(value):
+            parsed = value
+        }
+        do {
+            let info = try await client.describe(watch: parsed.watch)
+            if let id = ArchiveMatch.existingID(in: snapshot.videos, id: info.embedID, permalink: info.embedID, watch: info.watch.absoluteString),
+               let record = snapshot.videos[id] {
+                if record.status == .downloaded, let url = record.fileURL, FileManager.default.fileExists(atPath: url.path) {
+                    return "Already in the archive."
+                }
+                if record.status == .downloading || record.status == .queued {
+                    section = .downloads
+                    return "That video is already downloading."
+                }
+                download(id, resetAttempts: true)
+                section = .downloads
+                return nil
+            }
+            let id = info.embedID
+            LibraryStore.shared.update { state in
+                state.videos[id] = VideoRecord(
+                    id: id,
+                    permalink: id,
+                    title: info.title,
+                    watchURL: info.watch.absoluteString,
+                    thumbnailURL: info.thumbnail,
+                    published: Date(),
+                    duration: nil,
+                    views: nil,
+                    channelName: info.author,
+                    disposition: .downloadable,
+                    status: .catalogued,
+                    progress: 0,
+                    bytesWritten: 0,
+                    bytesExpected: 0,
+                    relativePath: nil,
+                    qualityLabel: nil,
+                    errorMessage: nil,
+                    attemptCount: 0,
+                    nextRetryAt: nil,
+                    segmentTotal: 0,
+                    segmentDone: 0,
+                    updatedAt: Date(),
+                    manuallyAdded: true
+                )
+                if !state.knownIDs.contains(id) {
+                    state.knownIDs.append(id)
+                }
+            }
+            download(id, resetAttempts: true)
+            section = .downloads
+            log(source: "link", message: "Added \(info.title).", level: "info")
+            return nil
+        } catch let error as LocalizedError {
+            return error.errorDescription ?? error.localizedDescription
+        } catch {
+            return error.localizedDescription
+        }
+    }
 }
 
 enum ArchiveSection: String, Hashable {
@@ -1024,6 +1085,19 @@ enum LibrarySort: String, CaseIterable, Identifiable {
         case .size: return "Size"
         case .status: return "Status"
         }
+    }
+
+    static func ordered(_ items: [VideoRecord], _ sort: LibrarySort) -> [VideoRecord] {
+        var items = items
+        switch sort {
+        case .newest: items.sort { ($0.published ?? .distantPast) > ($1.published ?? .distantPast) }
+        case .oldest: items.sort { ($0.published ?? .distantFuture) < ($1.published ?? .distantFuture) }
+        case .title: items.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case .duration: items.sort { ($0.duration ?? 0) > ($1.duration ?? 0) }
+        case .size: items.sort { $0.bytesExpected > $1.bytesExpected }
+        case .status: items.sort { $0.status.rawValue < $1.status.rawValue }
+        }
+        return items
     }
 }
 

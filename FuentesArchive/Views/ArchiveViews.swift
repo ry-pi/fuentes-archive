@@ -131,6 +131,7 @@ struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @Binding var selection: String?
     @State private var optionsID: String?
+    @State private var showAdd = false
 
     var body: some View {
         let items = model.videos()
@@ -193,7 +194,8 @@ struct LibraryView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Theme.background)
-        .navigationTitle("Fuentes Archive")
+        .navigationTitle("Videos")
+        .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: Binding(get: { optionsID != nil }, set: { if !$0 { optionsID = nil } })) {
             if let optionsID {
                 DownloadOptionsSheet(videoID: optionsID)
@@ -207,26 +209,22 @@ struct LibraryView: View {
         .searchable(text: $model.search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
         .refreshable { model.sync(trigger: "pull") }
         .toolbar(content: libraryToolbar)
+        .sheet(isPresented: $showAdd) {
+            AddLinkSheet()
+        }
     }
 
     @ToolbarContentBuilder
     private func libraryToolbar() -> some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Menu {
-                Picker("Sort", selection: $model.sort) {
-                    ForEach(LibrarySort.allCases) { item in
-                        Text(item.label).tag(item)
-                    }
-                }
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
-            }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button { showAdd = true } label: { Image(systemName: "plus") }
+                .accessibilityLabel("Add video")
+            SortMenu(sort: $model.sort)
             Button { model.sync(trigger: "manual") } label: {
                 if model.syncing { ProgressView() } else { Image(systemName: "arrow.clockwise") }
             }
             .disabled(model.syncing)
+            .accessibilityLabel("Refresh")
         }
     }
 
@@ -316,7 +314,7 @@ struct LibraryView: View {
             } else {
                 Text(model.search.isEmpty ? "No videos yet" : "No titles match")
                     .font(.headline)
-                Text(model.search.isEmpty ? "Pull to refresh to read the Videos tab." : "Try a shorter search.")
+                Text(model.search.isEmpty ? "Pull to refresh, or use + to paste a Rumble link." : "Try a shorter search.")
                     .font(.subheadline)
                     .foregroundStyle(Theme.muted)
             }
@@ -361,6 +359,11 @@ struct VideoRow: View {
                     Text(video.statusLabel)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(video.statusColor)
+                    if video.manuallyAdded {
+                        Text("Added")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Theme.gold)
+                    }
                     if let quality = video.qualityLabel {
                         Text(quality)
                             .font(.caption2)
@@ -484,43 +487,54 @@ struct SettingsView: View {
     @State private var pendingImport: ArchiveTransfer.Payload?
     @State private var confirmImport = false
     @State private var importError: String?
+    @State private var settingsQuery = ""
 
     var body: some View {
         Form {
-            Section("Downloads") {
-                NavigationLink("Auto-Download") { AutoDownloadSettings() }
-                Toggle("Save a copy to Photos", isOn: binding(\.saveToPhotos))
-            }
-            Section {
-                Button("Export library data") {
-                    exportFile = ArchiveFile(data: model.exportData())
-                    exporting = true
+            if shows("Downloads") || shows("Auto-Download") || shows("Photos") {
+                Section("Downloads") {
+                    NavigationLink("Auto-Download") { AutoDownloadSettings() }
+                    Toggle("Save a copy to Photos", isOn: binding(\.saveToPhotos))
                 }
-                Button("Import library data") { importing = true }
-            } header: {
-                Text("Export / Import")
-            } footer: {
-                Text("The file keeps settings, playback positions, and video metadata. It does not include the video or audio files.")
             }
-            Section("Library") {
-                LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
-                NavigationLink("Storage") { StorageView() }
-                NavigationLink("Background refresh log") { RefreshLogView() }
-                NavigationLink("Debug log") { DebugLogView() }
-                Button("Write a local RSS file") { feedURL = model.exportFeed() }
-                Button("Download newest 5 now") { model.downloadNewest(5) }
-                Button("Restore hidden videos") { model.restoreHidden() }
+            if shows("Export") || shows("Import") {
+                Section {
+                    Button("Export library data") {
+                        exportFile = ArchiveFile(data: model.exportData())
+                        exporting = true
+                    }
+                    Button("Import library data") { importing = true }
+                } header: {
+                    Text("Export / Import")
+                } footer: {
+                    Text("The file keeps settings, playback positions, and video metadata. It does not include the video or audio files.")
+                }
             }
-            Section("About") {
-                Text("Fuentes Archive \(AppVersion.current)")
-                Text("Files land in On My iPhone → Fuentes Archive. iOS decides when background refresh actually runs.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.muted)
+            if shows("Library") || shows("Storage") || shows("Debug") || shows("Background") || shows("log") || shows("RSS") || shows("hidden") {
+                Section("Library") {
+                    LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
+                    NavigationLink("Storage") { StorageView() }
+                    NavigationLink("Background refresh log") { RefreshLogView() }
+                    NavigationLink("Debug log") { DebugLogView() }
+                    Button("Write a local RSS file") { feedURL = model.exportFeed() }
+                    Button("Download newest 5 now") { model.downloadNewest(5) }
+                    Button("Restore hidden videos") { model.restoreHidden() }
+                }
+            }
+            if shows("About") {
+                Section("About") {
+                    Text("Fuentes Archive \(AppVersion.current)")
+                    Text("Files land in On My iPhone → Fuentes Archive. iOS decides when background refresh actually runs.")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                }
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $settingsQuery, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
         .sheet(isPresented: Binding(get: { feedURL != nil }, set: { if !$0 { feedURL = nil } })) {
             if let feedURL {
                 ShareSheet(url: feedURL)
@@ -567,6 +581,11 @@ struct SettingsView: View {
         } message: {
             Text(importError ?? "")
         }
+    }
+
+    private func shows(_ text: String) -> Bool {
+        let needle = settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        return needle.isEmpty || text.localizedCaseInsensitiveContains(needle)
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<Settings, Value>) -> Binding<Value> {
@@ -962,8 +981,17 @@ struct DownloadOptionsSheet: View {
 struct DownloadsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var footprint = DiskFootprint(app: 0, downloads: 0, capacity: 0)
+    @State private var query = ""
+    @State private var sort: LibrarySort = .status
 
-    private var rows: [VideoRecord] { model.downloadRows() }
+    private var rows: [VideoRecord] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = model.downloadRows().filter { video in
+            needle.isEmpty || video.title.localizedCaseInsensitiveContains(needle)
+        }
+        if sort == .status { return filtered }
+        return LibrarySort.ordered(filtered, sort)
+    }
 
     private var savedSignature: String {
         let saved = model.snapshot.videos.values
@@ -1001,15 +1029,16 @@ struct DownloadsView: View {
                 )
                 .listRowBackground(Color.clear)
             } else {
-                Section {
-                    controls
-                }
                 ForEach(rows) { video in
                     DownloadRow(video: video)
                 }
             }
         }
+        .listStyle(.plain)
         .navigationTitle("Downloads")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
+        .toolbar(content: downloadsToolbar)
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .safeAreaInset(edge: .bottom) {
@@ -1028,13 +1057,95 @@ struct DownloadsView: View {
         }
     }
 
-    private var controls: some View {
-        HStack {
-            Button("Pause all") { model.pauseAll() }
+    @ToolbarContentBuilder
+    private func downloadsToolbar() -> some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            SortMenu(sort: $sort)
+            Button { model.pauseAll() } label: { Image(systemName: "pause.circle") }
                 .disabled(!canPauseAll)
-            Spacer()
-            Button("Resume all") { model.resumeAll() }
+                .accessibilityLabel("Pause all")
+            Button { model.resumeAll() } label: { Image(systemName: "play.circle") }
                 .disabled(!canResumeAll)
+                .accessibilityLabel("Resume all")
+        }
+    }
+}
+
+struct SortMenu: View {
+    @Binding var sort: LibrarySort
+
+    var body: some View {
+        Menu {
+            Picker("Sort", selection: $sort) {
+                ForEach(LibrarySort.allCases) { item in
+                    Text(item.label).tag(item)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+        }
+        .accessibilityLabel("Sort")
+    }
+}
+
+struct AddLinkSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var message: String?
+    @State private var working = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("https://rumble.com/…", text: $text, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                } footer: {
+                    Text("A Rumble video, live replay, or a video from another channel. It downloads with the same progress, Live Activity, and widgets as the Videos tab.")
+                }
+                if let message {
+                    Section {
+                        Text(message)
+                            .foregroundStyle(Theme.danger)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .navigationTitle("Add video")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(content: addToolbar)
+        }
+        .preferredColorScheme(.dark)
+        .tint(Theme.gold)
+    }
+
+    @ToolbarContentBuilder
+    private func addToolbar() -> some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button(working ? "Adding…" : "Add") { submit() }
+                .disabled(working || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    private func submit() {
+        working = true
+        message = nil
+        let raw = text
+        Task {
+            let error = await model.addLink(raw)
+            working = false
+            if let error {
+                message = error
+            } else {
+                dismiss()
+            }
         }
     }
 }

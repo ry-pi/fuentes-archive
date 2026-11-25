@@ -43,6 +43,15 @@ struct RumbleClient {
         try await loadVariants(watch: watch)
     }
 
+    func describe(watch: URL) async throws -> RemoteVideo {
+        guard var components = URLComponents(string: "https://rumble.com/api/Media/oembed.json") else { throw RumbleError.noStream }
+        components.queryItems = [URLQueryItem(name: "url", value: watch.absoluteString)]
+        guard let oembedURL = components.url else { throw RumbleError.noStream }
+        let payload = try await jsonObject(oembedURL)
+        guard let remote = StreamResolver.remoteVideo(from: payload, watch: watch) else { throw RumbleError.noStream }
+        return remote
+    }
+
     func resolve(watch: URL, capHeight: Int?) async throws -> Variant {
         var components = URLComponents(string: "https://rumble.com/api/Media/oembed.json")!
         components.queryItems = [URLQueryItem(name: "url", value: watch.absoluteString)]

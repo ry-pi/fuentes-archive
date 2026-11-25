@@ -4,14 +4,16 @@ import SwiftUI
 struct PlayerTab: View {
     @EnvironmentObject private var model: AppModel
     @State private var query = ""
+    @State private var sort: LibrarySort = .newest
     @State private var selected: VideoRecord?
     @State private var shareURL: URL?
 
     private var rows: [VideoRecord] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return model.playable().filter { video in
+        let filtered = model.playable().filter { video in
             needle.isEmpty || video.title.localizedCaseInsensitiveContains(needle)
         }
+        return LibrarySort.ordered(filtered, sort)
     }
 
     var body: some View {
@@ -42,10 +44,13 @@ struct PlayerTab: View {
                 }
             }
         }
+        .listStyle(.plain)
         .navigationTitle("Player")
-        .searchable(text: $query, prompt: "Search saved files")
+        .navigationBarTitleDisplayMode(.large)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
         .scrollContentBackground(.hidden)
         .background(Theme.background)
+        .toolbar(content: playerToolbar)
         .fullScreenCover(item: $selected) { video in
             ArchivePlayer(video: video)
         }
@@ -59,6 +64,53 @@ struct PlayerTab: View {
                 ShareSheet(url: shareURL)
             }
         }
+    }
+
+    @ToolbarContentBuilder
+    private func playerToolbar() -> some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            SortMenu(sort: $sort)
+        }
+    }
+}
+
+struct PlayerLayerHost: UIViewRepresentable {
+    var player: AVPlayer
+    var pip: PiPController
+
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateUIView(_ view: PlayerLayerView, context: Context) {
+        view.playerLayer.player = player
+        pip.attach(layer: view.playerLayer)
+    }
+}
+
+final class PlayerLayerView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer {
+        guard let layer = layer as? AVPlayerLayer else { return AVPlayerLayer() }
+        return layer
+    }
+}
+
+struct PiPButton: View {
+    @ObservedObject var pip: PiPController
+
+    var body: some View {
+        Button { pip.toggle() } label: {
+            Image(systemName: pip.active ? "pip.exit" : "pip.enter")
+                .padding(10)
+                .background(.black.opacity(0.55))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Picture in Picture")
     }
 }
 
@@ -98,6 +150,7 @@ struct PlayerRow: View {
         if let url = video.fileURL, let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
             parts.append(Format.bytes(Int64(size)))
         }
+        if video.manuallyAdded { parts.append("Added") }
         if video.playbackSeconds > 3 { parts.append("Resume \(Format.clock(video.playbackSeconds))") }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -106,13 +159,14 @@ struct PlayerRow: View {
 struct ArchivePlayer: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     let video: VideoRecord
     @StateObject private var engine: PlayingItem
 
     init(video: VideoRecord) {
         self.video = video
         let url = video.fileURL ?? URL(fileURLWithPath: "/dev/null")
-        _engine = StateObject(wrappedValue: PlayingItem(url: url, title: video.title, audioOnly: video.isAudio, resume: video.playbackSeconds))
+        _engine = StateObject(wrappedValue: PlayingItem(url: url, title: video.title, audioOnly: video.isAudio, resume: video.playbackSeconds, artworkURL: video.thumbnailURL))
     }
 
     var body: some View {
@@ -127,13 +181,25 @@ struct ArchivePlayer: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
+            engine.interfaceVisible = true
             guard video.fileURL != nil else { return }
             engine.onPosition = { seconds in
                 model.rememberPlayback(video.id, seconds: seconds)
             }
+            engine.pip.onStop = { [weak engine] in
+                guard let engine else { return }
+                if !engine.interfaceVisible {
+                    engine.stop()
+                }
+            }
             engine.start()
         }
-        .onDisappear { engine.stop() }
+        .onDisappear {
+            engine.interfaceVisible = false
+            if scenePhase == .active, !engine.pip.active {
+                engine.stop()
+            }
+        }
     }
 
     private var missing: some View {
@@ -146,17 +212,53 @@ struct ArchivePlayer: View {
     }
 
     private var videoBody: some View {
-        ZStack(alignment: .topLeading) {
-            VideoPlayer(player: engine.player)
-                .ignoresSafeArea()
-            closeButton
+        VStack(spacing: 16) {
+            ZStack(alignment: .top) {
+                PlayerLayerHost(player: engine.player, pip: engine.pip)
+                    .background(.black)
+                HStack {
+                    PiPButton(pip: engine.pip)
+                    Spacer()
+                    closeButton
+                }
+                .padding(12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             if !engine.message.isEmpty {
                 Text(engine.message)
                     .font(.footnote)
-                    .padding(8)
-                    .background(.black.opacity(0.7))
-                    .padding(.top, 64)
+                    .foregroundStyle(Theme.danger)
             }
+            transport
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
+    }
+
+    private var transport: some View {
+        VStack(spacing: 12) {
+            Slider(value: $engine.current, in: 0...max(engine.duration, 1)) { editing in
+                engine.setScrubbing(editing)
+            }
+            .tint(Theme.gold)
+            HStack {
+                Text(Format.clock(engine.current))
+                Spacer()
+                Text(Format.clock(engine.duration > 0 ? engine.duration : video.duration))
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(Theme.muted)
+            HStack(spacing: 28) {
+                Button { engine.skip(-15) } label: { Image(systemName: "gobackward.15").font(.title2) }
+                Button { engine.toggle() } label: {
+                    Image(systemName: engine.playing ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 56))
+                        .foregroundStyle(Theme.gold)
+                }
+                Button { engine.skip(15) } label: { Image(systemName: "goforward.15").font(.title2) }
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -220,7 +322,10 @@ struct ArchivePlayer: View {
     }
 
     private var closeButton: some View {
-        Button { dismiss() } label: {
+        Button {
+            engine.stop()
+            dismiss()
+        } label: {
             Image(systemName: "xmark")
                 .padding(10)
                 .background(.black.opacity(0.55))

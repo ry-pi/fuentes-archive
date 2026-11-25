@@ -318,6 +318,53 @@ final class ArchiveTests: XCTestCase {
         return try decoder.decode(VideoRecord.self, from: Data(json.utf8))
     }
 
+    func testRumbleLinkAcceptsVideosAndRejectsChannels() {
+        let watch = RumbleLink.parse("https://rumble.com/v7i5j76-nick-fuentes.html?e9s=src")
+        guard case let .success(parsed) = watch else {
+            XCTFail("expected a video link")
+            return
+        }
+        XCTAssertEqual(parsed.permalink, "v7i5j76")
+        XCTAssertEqual(parsed.watch.host, "rumble.com")
+        let embed = RumbleLink.parse("rumble.com/embed/v7i5j76/")
+        guard case let .success(embedded) = embed else {
+            XCTFail("expected an embed link")
+            return
+        }
+        XCTAssertEqual(embedded.permalink, "v7i5j76")
+        XCTAssertEqual(embedded.watch.path, "/embed/v7i5j76/")
+        XCTAssertEqual(Self.linkFailure(RumbleLink.parse("")), .empty)
+        XCTAssertEqual(Self.linkFailure(RumbleLink.parse("https://example.com/v1")), .notRumble)
+        XCTAssertEqual(Self.linkFailure(RumbleLink.parse("https://rumble.com/c/nickjfuentes/videos")), .notVideo)
+    }
+
+    private static func linkFailure(_ result: Result<RumbleLink.Parsed, RumbleLink.LinkError>) -> RumbleLink.LinkError? {
+        if case let .failure(error) = result { return error }
+        return nil
+    }
+
+    func testManualVideosAreNotDuplicatesOrAutoDeleted() throws {
+        var channel = try sampleRecord(status: "downloaded")
+        channel.permalink = "v7i5j76"
+        channel.watchURL = "https://rumble.com/v7i5j76-nick.html"
+        channel.relativePath = "Videos/channel.mp4"
+        channel.updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        var videos = [channel.id: channel]
+        XCTAssertEqual(ArchiveMatch.existingID(in: videos, id: "v7i5j76", permalink: "v7i5j76", watch: "https://rumble.com/embed/v7i5j76/"), channel.id)
+        var manual = channel
+        manual.id = "manual"
+        manual.manuallyAdded = true
+        manual.relativePath = "Videos/one.mp4"
+        manual.duration = 100
+        manual.playbackSeconds = 95
+        var settings = Settings()
+        settings.deleteWatched = true
+        settings.deleteAfterDays = 1
+        let remove = Retention.removable([channel, manual], settings: settings, now: Date(timeIntervalSince1970: 1_760_000_000))
+        XCTAssertEqual(remove, [channel.id])
+        XCTAssertFalse(remove.contains(manual.id))
+    }
+
     func testBackupSchemaRejectsUnknownVersions() throws {
         let bad = Data("{\"schema\":9}".utf8)
         XCTAssertThrowsError(try ArchiveTransfer.parse(bad))

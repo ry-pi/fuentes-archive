@@ -1,5 +1,8 @@
 import AVFoundation
+import AVKit
+import Combine
 import MediaPlayer
+import UIKit
 
 enum PlaybackSession {
     static func activate(audioOnly: Bool) {
@@ -12,6 +15,10 @@ enum PlaybackSession {
         } catch {
             DebugLog.event("audio session failed \(error.localizedDescription)")
         }
+    }
+
+    static func deactivate() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
 }
 
@@ -69,17 +76,34 @@ final class NowPlayingController {
     static let shared = NowPlayingController()
     private weak var player: AVPlayer?
     private var title = ""
+    private var artwork: UIImage?
     private var installed = false
+    var onPlay: (() -> Void)?
+    var onPause: (() -> Void)?
+    var onSkip: ((Double) -> Void)?
+    var onSeek: ((Double) -> Void)?
 
     func attach(player: AVPlayer, title: String) {
         self.player = player
         self.title = title
         install()
+        setCommands(enabled: true)
+        refresh()
+    }
+
+    func setArtwork(_ image: UIImage) {
+        artwork = image
         refresh()
     }
 
     func detach() {
         player = nil
+        artwork = nil
+        onPlay = nil
+        onPause = nil
+        onSkip = nil
+        onSeek = nil
+        setCommands(enabled: false)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -91,10 +115,14 @@ final class NowPlayingController {
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: "Fuentes Archive",
             MPNowPlayingInfoPropertyElapsedPlaybackTime: elapsed.isFinite ? elapsed : 0,
-            MPNowPlayingInfoPropertyPlaybackRate: player.rate
+            MPNowPlayingInfoPropertyPlaybackRate: player.rate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: player.defaultRate
         ]
         if duration.isFinite, duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = duration
+        }
+        if let artwork {
+            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: artwork.size) { _ in artwork }
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
@@ -103,49 +131,120 @@ final class NowPlayingController {
         guard !installed else { return }
         installed = true
         let center = MPRemoteCommandCenter.shared()
-        center.playCommand.isEnabled = true
-        center.pauseCommand.isEnabled = true
-        center.skipForwardCommand.isEnabled = true
-        center.skipBackwardCommand.isEnabled = true
         center.skipForwardCommand.preferredIntervals = [15]
         center.skipBackwardCommand.preferredIntervals = [15]
-        center.changePlaybackPositionCommand.isEnabled = true
         center.playCommand.addTarget { [weak self] _ in
-            self?.player?.play()
-            self?.player?.rate = self?.player?.defaultRate ?? 1
-            self?.refresh()
+            guard let self else { return .commandFailed }
+            let play = self.onPlay
+            DispatchQueue.main.async {
+                if let play { play() }
+            }
             return .success
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            self?.player?.pause()
-            self?.refresh()
+            guard let self else { return .commandFailed }
+            let pause = self.onPause
+            DispatchQueue.main.async {
+                if let pause { pause() }
+            }
             return .success
         }
         center.skipForwardCommand.addTarget { [weak self] _ in
-            self?.skip(15)
+            guard let self else { return .commandFailed }
+            let skip = self.onSkip
+            DispatchQueue.main.async {
+                if let skip { skip(15) }
+            }
             return .success
         }
         center.skipBackwardCommand.addTarget { [weak self] _ in
-            self?.skip(-15)
+            guard let self else { return .commandFailed }
+            let skip = self.onSkip
+            DispatchQueue.main.async {
+                if let skip { skip(-15) }
+            }
             return .success
         }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let position = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            self?.seek(position.positionTime)
+            guard let self, let position = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            let seek = self.onSeek
+            let seconds = position.positionTime
+            DispatchQueue.main.async {
+                if let seek { seek(seconds) }
+            }
             return .success
         }
     }
 
-    private func skip(_ delta: Double) {
-        let now = player?.currentTime().seconds ?? 0
-        seek(max(0, (now.isFinite ? now : 0) + delta))
-    }
-
-    private func seek(_ seconds: Double) {
-        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
-        refresh()
+    private func setCommands(enabled: Bool) {
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.isEnabled = enabled
+        center.pauseCommand.isEnabled = enabled
+        center.skipForwardCommand.isEnabled = enabled
+        center.skipBackwardCommand.isEnabled = enabled
+        center.changePlaybackPositionCommand.isEnabled = enabled
     }
 }
+
+final class PiPController: NSObject, ObservableObject, AVPictureInPictureControllerDelegate {
+    @Published var active = false
+    @Published var possible = false
+    private var pip: AVPictureInPictureController?
+    var onRestore: (() -> Void)?
+    var onStop: (() -> Void)?
+
+    func attach(layer: AVPlayerLayer) {
+        if pip?.playerLayer === layer {
+            possible = pip?.isPictureInPicturePossible ?? false
+            return
+        }
+        pip?.delegate = nil
+        guard AVPictureInPictureController.isPictureInPictureSupported(),
+              let controller = AVPictureInPictureController(playerLayer: layer) else {
+            pip = nil
+            possible = false
+            return
+        }
+        controller.delegate = self
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        pip = controller
+        possible = controller.isPictureInPicturePossible
+    }
+
+    func toggle() {
+        guard let pip else { return }
+        if pip.isPictureInPictureActive {
+            pip.stopPictureInPicture()
+            return
+        }
+        guard pip.isPictureInPicturePossible else { return }
+        pip.startPictureInPicture()
+    }
+
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        DispatchQueue.main.async { self.active = true }
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        let stop = onStop
+        DispatchQueue.main.async {
+            self.active = false
+            if let stop { stop() }
+        }
+    }
+
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        let restore = onRestore
+        DispatchQueue.main.async {
+            if let restore { restore() }
+            completionHandler(true)
+        }
+    }
+}
+
 
 @MainActor
 final class PlayingItem: ObservableObject {
@@ -157,50 +256,109 @@ final class PlayingItem: ObservableObject {
     @Published var playing = false
     @Published var speed: Float = 1
     @Published var message = ""
+    let pip = PiPController()
+    var interfaceVisible = false
     private var token: Any?
     private var statusWatch: NSKeyValueObservation?
+    private var observers: [NSObjectProtocol] = []
     private var lastSaved: Double = -1
     var onPosition: ((Double) -> Void)?
     private var scrubbing = false
+    private var resumeAfterInterruption = false
+    private var started = false
+    private var acceptingRemote = false
+    private let artworkURL: String?
 
-    init(url: URL, title: String, audioOnly: Bool, resume: Double) {
+    init(url: URL, title: String, audioOnly: Bool, resume: Double, artworkURL: String? = nil) {
         self.title = title
         self.audioOnly = audioOnly
+        self.artworkURL = artworkURL
         let item = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: item)
         player.volume = 1
         player.isMuted = false
         player.defaultRate = 1
+        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         current = resume
     }
 
     func start() {
+        if started { return }
+        started = true
+        acceptingRemote = true
         PlaybackSession.activate(audioOnly: audioOnly)
         player.volume = 1
         player.isMuted = false
         watchStatus()
+        watchSession()
         if current > 1 {
             player.seek(to: CMTime(seconds: current, preferredTimescale: 600))
         }
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         token = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            Task { @MainActor in self?.tick(time.seconds) }
+            let seconds = time.seconds
+            Task { @MainActor in
+                guard let self else { return }
+                self.tick(seconds)
+            }
         }
         player.play()
         player.rate = speed
         playing = true
-        NowPlayingController.shared.attach(player: player, title: title)
+        let remote = NowPlayingController.shared
+        remote.onPlay = { [weak self] in
+            guard let self else { return }
+            self.playFromRemote()
+        }
+        remote.onPause = { [weak self] in
+            guard let self else { return }
+            self.pauseFromRemote()
+        }
+        remote.onSkip = { [weak self] delta in
+            guard let self else { return }
+            self.skip(delta)
+        }
+        remote.onSeek = { [weak self] seconds in
+            guard let self else { return }
+            self.seek(seconds)
+        }
+        remote.attach(player: player, title: title)
+        loadArtwork()
         Task { await logTracks() }
     }
 
     func stop() {
+        acceptingRemote = false
         if let token { player.removeTimeObserver(token) }
         token = nil
         statusWatch = nil
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers = []
         player.pause()
         playing = false
         NowPlayingController.shared.detach()
+        if !pip.active {
+            PlaybackSession.deactivate()
+        }
+        started = false
         store(current)
+    }
+
+    func playFromRemote() {
+        guard acceptingRemote else { return }
+        PlaybackSession.activate(audioOnly: audioOnly)
+        player.play()
+        player.rate = speed
+        playing = true
+        NowPlayingController.shared.refresh()
+    }
+
+    func pauseFromRemote() {
+        player.pause()
+        playing = false
+        NowPlayingController.shared.refresh()
     }
 
     func toggle() {
@@ -270,6 +428,50 @@ final class PlayingItem: ObservableObject {
                 }
             }
         }
+    }
+
+    private func watchSession() {
+        let center = NotificationCenter.default
+        let session = AVAudioSession.sharedInstance()
+        let interruption = center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] note in
+            let typeRaw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let optionsRaw = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            Task { @MainActor in
+                guard let self, let typeRaw, let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw ?? 0)
+                if type == .began {
+                    self.resumeAfterInterruption = self.playing
+                    self.pauseFromRemote()
+                } else if type == .ended {
+                    if options.contains(.shouldResume), self.resumeAfterInterruption {
+                        self.playFromRemote()
+                    }
+                    self.resumeAfterInterruption = false
+                }
+            }
+        }
+        let route = center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) { [weak self] note in
+            let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor in
+                guard let self, let reasonRaw, let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
+                if reason == .oldDeviceUnavailable {
+                    self.pauseFromRemote()
+                }
+            }
+        }
+        observers.append(interruption)
+        observers.append(route)
+    }
+
+    private func loadArtwork() {
+        guard let artworkURL, let url = URL(string: artworkURL) else { return }
+        URLSession.shared.dataTask(with: url) { data, response, _ in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard let data, (200..<300).contains(status), let image = UIImage(data: data) else { return }
+            DispatchQueue.main.async {
+                NowPlayingController.shared.setArtwork(image)
+            }
+        }.resume()
     }
 
     private func logTracks() async {
