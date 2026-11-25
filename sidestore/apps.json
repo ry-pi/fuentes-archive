@@ -22,16 +22,7 @@
           "version": "1.9.0",
           "buildVersion": "10",
           "date": "2026-11-25T03:10:00Z",
-          "localizedDescription": "Settings has a Playback section for background audio, Picture in Picture, skip interval, headphones, interruptions, resume position, and default speed. The Settings tab is grouped into Downloads, Playback, Storage, Notifications, Widgets, Data, and About.",
-          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa",
-          "size": 2500000,
-          "minOSVersion": "17.0"
-        },
-        {
-          "version": "1.8.0",
-          "buildVersion": "9",
-          "date": "2026-11-25T02:30:00Z",
-          "localizedDescription": "Paste any Rumble link to archive it, including other channels and live replays. Playback continues in the background with lock screen controls, and video can move into Picture in Picture. Every tab uses the same title and toolbar layout.",
+          "localizedDescription": "Settings has a Playback section for background audio, Picture in Picture, skip interval, headphones, interruptions, resume position, and default speed. The Settings tab is grouped into Downloads, Playback, Storage, Notifications, Widgets, Data, and About.\n\nAlso includes 1.8.0:\nPaste any Rumble link to archive it, including other channels and live replays. Playback continues in the background with lock screen controls, and video can move into Picture in Picture. Every tab uses the same title and toolbar layout.",
           "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/latest/download/FuentesArchive-unsigned.ipa",
           "size": 2500000,
           "minOSVersion": "17.0"
