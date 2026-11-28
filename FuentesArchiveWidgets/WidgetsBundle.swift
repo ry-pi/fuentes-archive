@@ -77,8 +77,8 @@ extension ArchiveSnapshot {
     )
 
     var syncLine: String {
-        guard let lastSync else { return "No successful sync yet" }
-        return "Last successful sync \(SnapshotBytes.clock(lastSync))"
+        guard let lastSync else { return "Synced: not yet" }
+        return "Synced: \(SnapshotBytes.clock(lastSync))"
     }
 }
 

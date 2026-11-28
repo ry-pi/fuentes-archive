@@ -28,6 +28,7 @@ struct PlayerTab: View {
             } else {
                 ForEach(rows) { video in
                     PlayerRow(video: video) { selected = video }
+                        .listRowBackground(Theme.card)
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) { model.deleteFile(video.id) } label: {
                                 Label("Delete file", systemImage: "trash")
@@ -46,10 +47,8 @@ struct PlayerTab: View {
         }
         .listStyle(.plain)
         .navigationTitle("Player")
-        .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
-        .scrollContentBackground(.hidden)
-        .background(Theme.background)
+        .archiveChrome()
         .toolbar(content: playerToolbar)
         .fullScreenCover(item: $selected) { video in
             ArchivePlayer(video: video)
@@ -181,7 +180,7 @@ struct ArchivePlayer: View {
                 videoBody
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
         .onAppear {
             engine.interfaceVisible = true
             guard video.fileURL != nil else { return }

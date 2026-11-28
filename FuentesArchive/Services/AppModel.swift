@@ -126,18 +126,23 @@ final class AppModel: ObservableObject {
     func video(_ id: String) -> VideoRecord? { snapshot.videos[id] }
 
     func reconcileMissingFiles() {
-        let missing = snapshot.videos.values.filter { record in
-            guard record.status == .downloaded, let url = record.fileURL else { return false }
-            return !FileManager.default.fileExists(atPath: url.path)
+        let active: Set<DownloadStatus> = [.downloading, .queued, .paused, .waitingForWiFi]
+        let stale = snapshot.videos.values.filter { record in
+            if active.contains(record.status) { return false }
+            let fileOK = record.fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+            if fileOK && record.status == .downloaded { return false }
+            return record.status == .downloaded || record.qualityLabel != nil || record.relativePath != nil
         }
-        guard !missing.isEmpty else { return }
+        guard !stale.isEmpty else { return }
         LibraryStore.shared.update { state in
-            for record in missing {
+            for record in stale {
                 LibraryEdit.update(&state.videos, record.id) { item in
-                    item.status = .catalogued
+                    item.qualityLabel = nil
                     item.relativePath = nil
-                    item.progress = 0
+                    item.bytesExpected = 0
                     item.bytesWritten = 0
+                    item.progress = 0
+                    if item.status == .downloaded { item.status = .catalogued }
                 }
             }
         }

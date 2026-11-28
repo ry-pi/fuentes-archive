@@ -199,6 +199,18 @@ struct LogEntry: Codable, Identifiable, Equatable {
     var level: String
 }
 
+enum Appearance: String, Codable, CaseIterable, Identifiable {
+    case light, dark, oled
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .light: return "Light"
+        case .dark: return "Dark"
+        case .oled: return "OLED"
+        }
+    }
+}
+
 struct Settings: Codable, Equatable {
     var autoDownload: Bool = true
     var wifiOnly: Bool = true
@@ -225,13 +237,14 @@ struct Settings: Codable, Equatable {
     var resumeAfterInterruption: Bool = true
     var rememberPlayback: Bool = true
     var playbackSpeed: Double = 1
+    var appearance: Appearance = .dark
 
     enum CodingKeys: String, CodingKey {
         case autoDownload, wifiOnly, quality, saveToPhotos, notify, maxPages, backfillCount, dismissedIntro, verboseLog
         case checkIntervalMinutes, autoAudioOnly, autoNewerThan, autoNewestCount, maxConcurrent
         case deleteWatched, deleteAfterDays, storageCapGB, notifyOnNew
         case backgroundAudio, autoPictureInPicture, skipSeconds, pauseOnDisconnect
-        case resumeAfterInterruption, rememberPlayback, playbackSpeed
+        case resumeAfterInterruption, rememberPlayback, playbackSpeed, appearance
     }
 
     init() {}
@@ -265,6 +278,11 @@ struct Settings: Codable, Equatable {
         rememberPlayback = try container.decodeIfPresent(Bool.self, forKey: .rememberPlayback) ?? true
         let storedSpeed = try container.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1
         playbackSpeed = [1, 1.25, 1.5, 2].contains(storedSpeed) ? storedSpeed : 1
+        if let stored = try? container.decode(Appearance.self, forKey: .appearance) {
+            appearance = stored
+        } else {
+            appearance = .dark
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -294,6 +312,7 @@ struct Settings: Codable, Equatable {
         try container.encode(resumeAfterInterruption, forKey: .resumeAfterInterruption)
         try container.encode(rememberPlayback, forKey: .rememberPlayback)
         try container.encode(playbackSpeed, forKey: .playbackSpeed)
+        try container.encode(appearance, forKey: .appearance)
     }
 }
 
@@ -514,6 +533,20 @@ enum ArchiveTransfer {
             }
         default:
             break
+        }
+        let saved = copy.status == .downloaded && fileOnDisk
+        let transferring = partialOnDisk && [.downloading, .queued, .paused, .waitingForWiFi].contains(copy.status)
+        if !saved && !transferring {
+            copy.qualityLabel = nil
+            copy.bytesExpected = 0
+            if !fileOnDisk {
+                copy.relativePath = nil
+                if copy.status == .downloaded {
+                    copy.status = .catalogued
+                    copy.progress = 0
+                    copy.bytesWritten = 0
+                }
+            }
         }
         return copy
     }

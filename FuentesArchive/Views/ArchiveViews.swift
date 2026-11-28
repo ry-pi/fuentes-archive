@@ -2,15 +2,78 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+extension Appearance {
+    var colorScheme: ColorScheme {
+        self == .light ? .light : .dark
+    }
+}
+
 enum Theme {
-    static let background = Color(red: 0.055, green: 0.055, blue: 0.06)
-    static let card = Color(red: 0.11, green: 0.11, blue: 0.125)
-    static let line = Color.white.opacity(0.08)
+    static var appearance: Appearance = .dark
     /// Accent. This slot was gold in 1.5.0; it is red now.
     static let gold = Color(red: 0.86, green: 0.16, blue: 0.20)
-    static let muted = Color(white: 0.62)
-    static let danger = Color(red: 0.90, green: 0.36, blue: 0.32)
-    static let ok = Color(red: 0.45, green: 0.74, blue: 0.52)
+    static var background: Color {
+        switch appearance {
+        case .light: return Color(red: 0.95, green: 0.95, blue: 0.97)
+        case .dark: return Color(red: 0.11, green: 0.11, blue: 0.12)
+        case .oled: return .black
+        }
+    }
+    static var card: Color {
+        switch appearance {
+        case .light: return .white
+        case .dark: return Color(red: 0.17, green: 0.17, blue: 0.18)
+        case .oled: return Color(white: 0.08)
+        }
+    }
+    static var line: Color {
+        appearance == .light ? Color.black.opacity(0.08) : Color.white.opacity(0.12)
+    }
+    static var muted: Color {
+        appearance == .light ? Color(white: 0.38) : Color(white: 0.62)
+    }
+    static var text: Color {
+        appearance == .light ? .black : .white
+    }
+    static let danger = Color(red: 0.86, green: 0.22, blue: 0.24)
+    static var ok: Color {
+        appearance == .light ? Color(red: 0.16, green: 0.52, blue: 0.28) : Color(red: 0.45, green: 0.74, blue: 0.52)
+    }
+
+    static func use(_ appearance: Appearance) {
+        self.appearance = appearance
+        let background = UIColor(self.background)
+        let card = UIColor(self.card)
+        let nav = UINavigationBarAppearance()
+        nav.configureWithOpaqueBackground()
+        nav.backgroundColor = background
+        nav.shadowColor = UIColor(line)
+        UINavigationBar.appearance().standardAppearance = nav
+        UINavigationBar.appearance().scrollEdgeAppearance = nav
+        UINavigationBar.appearance().compactAppearance = nav
+        let tab = UITabBarAppearance()
+        tab.configureWithOpaqueBackground()
+        tab.backgroundColor = background
+        UITabBar.appearance().standardAppearance = tab
+        UITabBar.appearance().scrollEdgeAppearance = tab
+        let search = UISearchBar.appearance()
+        search.barTintColor = background
+        search.backgroundColor = background
+        search.isTranslucent = false
+        let field = UITextField.appearance(whenContainedInInstancesOf: [UISearchBar.self])
+        field.backgroundColor = card
+    }
+}
+
+extension View {
+    func archiveChrome() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(Theme.background)
+            .toolbarBackground(Theme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+    }
 }
 
 enum Format {
@@ -102,7 +165,8 @@ struct RootView: View {
     @State private var selection: String?
 
     var body: some View {
-        TabView(selection: $model.section) {
+        let _ = Theme.use(model.settings.appearance)
+        return TabView(selection: $model.section) {
             NavigationStack { library }
                 .tag(ArchiveSection.videos)
                 .tabItem { Label("Videos", systemImage: "play.rectangle.on.rectangle") }
@@ -117,8 +181,11 @@ struct RootView: View {
                 .tag(ArchiveSection.settings)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(model.settings.appearance.colorScheme)
         .tint(Theme.gold)
+        .toolbarBackground(Theme.background, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .id(model.settings.appearance)
     }
 
     private var library: some View {
@@ -195,7 +262,7 @@ struct LibraryView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("Videos")
-        .navigationBarTitleDisplayMode(.large)
+        .archiveChrome()
         .sheet(isPresented: Binding(get: { optionsID != nil }, set: { if !$0 { optionsID = nil } })) {
             if let optionsID {
                 DownloadOptionsSheet(videoID: optionsID)
@@ -235,11 +302,11 @@ struct LibraryView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let last = model.snapshot.lastSync {
-                Text("Last successful sync \(Format.absolute(last))")
+                Text("Synced: \(Format.absolute(last))")
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
             } else {
-                Text("No successful sync yet")
+                Text("Synced: not yet")
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
             }
@@ -294,7 +361,7 @@ struct LibraryView: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .background(model.filter == item ? Theme.gold : Theme.card)
-                            .foregroundStyle(Color.white)
+                            .foregroundStyle(model.filter == item ? Color.white : Theme.text)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -364,7 +431,7 @@ struct VideoRow: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Theme.gold)
                     }
-                    if let quality = video.qualityLabel {
+                    if video.status == .downloaded, let quality = QualityLabel.display(video.qualityLabel) {
                         Text(quality)
                             .font(.caption2)
                             .foregroundStyle(Theme.muted)
@@ -487,14 +554,24 @@ struct SettingsView: View {
     @State private var pendingImport: ArchiveTransfer.Payload?
     @State private var confirmImport = false
     @State private var importError: String?
-    @State private var settingsQuery = ""
     @State private var confirmRestore = false
     @State private var confirmDeleteAll = false
 
     var body: some View {
         Form {
-            if shows("Downloads", "Auto-download", "Photos", "Newest") {
-                Section {
+            Section {
+                Picker("Theme", selection: binding(\.appearance)) {
+                    ForEach(Appearance.allCases) { item in
+                        Text(item.label).tag(item)
+                    }
+                }
+            } header: {
+                Text("Theme")
+            } footer: {
+                Text("Dark uses iOS greys. OLED uses black. Light is the light palette. The accent stays red.")
+            }
+            .listRowBackground(Theme.card)
+            Section {
                     NavigationLink("Auto-download") { AutoDownloadSettings() }
                     Toggle("Save a copy to Photos", isOn: binding(\.saveToPhotos))
                     Button("Download newest 5") { model.downloadNewest(5) }
@@ -503,9 +580,8 @@ struct SettingsView: View {
                 } footer: {
                     Text("Auto-download controls the schedule, quality, and network. Photos gets a copy only after a file finishes.")
                 }
-            }
-            if shows("Playback", "Background", "Picture", "Skip", "Headphones", "Interrupt", "Position", "Speed") {
-                Section {
+            .listRowBackground(Theme.card)
+            Section {
                     Toggle("Background audio", isOn: binding(\.backgroundAudio))
                     Toggle("Picture in Picture", isOn: binding(\.autoPictureInPicture))
                         .disabled(!model.settings.backgroundAudio)
@@ -528,10 +604,8 @@ struct SettingsView: View {
                 } footer: {
                     Text("Background audio keeps the player going with the screen locked. Picture in Picture starts on its own when you leave during a video, and only while background audio is on. Skip applies in the player and on the lock screen. Default speed is used the next time a video opens.")
                 }
-            }
-            if shows("Storage", "Saved", "Delete", "Watching", "Cap") {
-                Section {
-                    LabeledContent("Saved files", value: Format.bytes(model.storageBytes()))
+            .listRowBackground(Theme.card)
+            Section {
                     NavigationLink("Storage") { StorageView() }
                     Toggle("Delete after watching", isOn: binding(\.deleteWatched))
                     Stepper(value: binding(\.deleteAfterDays), in: 0...365) {
@@ -549,9 +623,8 @@ struct SettingsView: View {
                 } footer: {
                     Text("Watched, age, and cap rules do not remove videos you added from a link.")
                 }
-            }
-            if shows("Notifications", "Live", "Finishes", "Starts") {
-                Section {
+            .listRowBackground(Theme.card)
+            Section {
                     Toggle("When a download starts", isOn: binding(\.notifyOnNew))
                     Toggle("When a download finishes", isOn: binding(\.notify))
                 } header: {
@@ -559,19 +632,8 @@ struct SettingsView: View {
                 } footer: {
                     Text("The Live Activity stays on the lock screen while a download is active and closes when it finishes.")
                 }
-            }
-            if shows("Widgets", "Gallery", "Activity") {
-                Section {
-                    LabeledContent("Live Activity", value: "While downloading")
-                    LabeledContent("Home screen", value: "Widget gallery")
-                } header: {
-                    Text("Widgets")
-                } footer: {
-                    Text("Widgets and the Live Activity use the same progress as the Downloads tab. They refresh when a download starts, advances, and finishes.")
-                }
-            }
-            if shows("Data", "Export", "Import", "RSS") {
-                Section {
+            .listRowBackground(Theme.card)
+            Section {
                     Button("Export library data") {
                         exportFile = ArchiveFile(data: model.exportData())
                         exporting = true
@@ -583,21 +645,18 @@ struct SettingsView: View {
                 } footer: {
                     Text("Export and import keep settings, playback positions, and video metadata. They do not include the media files.")
                 }
-            }
-            if shows("About", "Version", "Files", "Log", "Debug") {
-                Section {
+            .listRowBackground(Theme.card)
+            Section {
                     LabeledContent("Version", value: AppVersion.current)
-                    LabeledContent("Files", value: "On My iPhone")
                     NavigationLink("Background refresh log") { RefreshLogView() }
                     NavigationLink("Debug log") { DebugLogView() }
                 } header: {
                     Text("About")
                 } footer: {
-                    Text("Finished files are in On My iPhone → Fuentes Archive. iOS decides when a background refresh actually runs.")
+                    Text("Finished files are in On My iPhone → Fuentes Archive.")
                 }
-            }
-            if shows("Restore", "Hidden", "Delete") {
-                Section {
+            .listRowBackground(Theme.card)
+            Section {
                     Button("Restore hidden videos", role: .destructive) { confirmRestore = true }
                     Button("Delete all saved files", role: .destructive) { confirmDeleteAll = true }
                 } header: {
@@ -605,13 +664,10 @@ struct SettingsView: View {
                 } footer: {
                     Text("Restore puts hidden titles back in the list. Delete removes the media files and leaves the list so you can download them again.")
                 }
-            }
+            .listRowBackground(Theme.card)
         }
-        .scrollContentBackground(.hidden)
-        .background(Theme.background)
         .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $settingsQuery, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
+        .archiveChrome()
         .sheet(isPresented: Binding(get: { feedURL != nil }, set: { if !$0 { feedURL = nil } })) {
             if let feedURL {
                 ShareSheet(url: feedURL)
@@ -670,12 +726,6 @@ struct SettingsView: View {
         } message: {
             Text("The video list stays. You can download them again.")
         }
-    }
-
-    private func shows(_ words: String...) -> Bool {
-        let needle = settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        if needle.isEmpty { return true }
-        return words.contains { $0.localizedCaseInsensitiveContains(needle) }
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<Settings, Value>) -> Binding<Value> {
@@ -953,7 +1003,7 @@ struct DownloadOptionsSheet: View {
             .toolbar(content: closeToolbar)
         }
         .presentationDetents([.medium, .large])
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
         .task { await load() }
         .fullScreenCover(isPresented: $play) {
             if let video {
@@ -1108,13 +1158,14 @@ struct DownloadsView: View {
             } else {
                 ForEach(rows) { video in
                     DownloadRow(video: video)
+                        .listRowBackground(Theme.card)
                 }
             }
         }
         .listStyle(.plain)
         .navigationTitle("Downloads")
-        .navigationBarTitleDisplayMode(.large)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search titles")
+        .archiveChrome()
         .toolbar(content: downloadsToolbar)
         .scrollContentBackground(.hidden)
         .background(Theme.background)
@@ -1196,7 +1247,7 @@ struct AddLinkSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(content: addToolbar)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.appearance.colorScheme)
         .tint(Theme.gold)
     }
 
@@ -1317,7 +1368,7 @@ struct DownloadRow: View {
 
     private var statusLine: String {
         var parts = [video.status.label]
-        if let label = QualityLabel.display(video.qualityLabel) { parts.append(label) }
+        if video.status == .downloaded, let label = QualityLabel.display(video.qualityLabel) { parts.append(label) }
         if video.status == .downloading {
             let speed = Format.rate(video.bytesPerSecond)
             if !speed.isEmpty { parts.append(speed) }

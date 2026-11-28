@@ -397,6 +397,22 @@ final class ArchiveTests: XCTestCase {
         XCTAssertEqual(odd.playbackSpeed, 1)
     }
 
+    func testMissingFileDropsStaleQualityAndThemeDefaults() throws {
+        var saved = try sampleRecord(status: "downloaded")
+        saved.qualityLabel = "480p"
+        saved.relativePath = "Videos/missing.mp4"
+        let missing = ArchiveTransfer.imported(saved, fileOnDisk: false, partialOnDisk: false)
+        XCTAssertNil(missing.qualityLabel)
+        XCTAssertNil(missing.relativePath)
+        XCTAssertEqual(missing.status, .catalogued)
+        let present = ArchiveTransfer.imported(saved, fileOnDisk: true, partialOnDisk: false)
+        XCTAssertEqual(present.qualityLabel, "480p")
+        XCTAssertEqual(present.status, .downloaded)
+        let old = try JSONDecoder().decode(Settings.self, from: Data("{\"wifiOnly\":false}".utf8))
+        XCTAssertEqual(old.appearance, .dark)
+        XCTAssertFalse(old.wifiOnly)
+    }
+
     func testBackupSchemaRejectsUnknownVersions() throws {
         let bad = Data("{\"schema\":9}".utf8)
         XCTAssertThrowsError(try ArchiveTransfer.parse(bad))
