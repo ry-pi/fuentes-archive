@@ -100,12 +100,12 @@
           "minOSVersion": "17.0"
         }
       ],
-      "appPermissions": [
-        {
-          "type": "photos",
-          "usageDescription": "Optional. Copies a finished download into Photos when that setting is on. The file is always kept in the Files app."
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSPhotoLibraryAddUsageDescription": "Optional. Copies a finished download into Photos when that setting is on. The file is always kept in the Files app."
         }
-      ]
+      }
     }
   ],
   "news": []
