@@ -1,0 +1,118 @@
+{
+  "name": "Fuentes Archive",
+  "subtitle": "SideStore source for the unsigned build",
+  "description": "Unsigned Fuentes Archive builds. The IPA is the latest GitHub Release asset. Add as a SideStore source: https://raw.githubusercontent.com/ry-pi/fuentes-archive/source/apps.json",
+  "website": "https://rumble.com/c/nickjfuentes/videos",
+  "tintColor": "DB2933",
+  "featuredApps": [
+    "com.local.fuentesarchive"
+  ],
+  "apps": [
+    {
+      "name": "Fuentes Archive",
+      "bundleIdentifier": "com.local.fuentesarchive",
+      "developerName": "Fuentes Archive",
+      "subtitle": "New videos from the Rumble Videos tab",
+      "localizedDescription": "Watches https://rumble.com/c/nickjfuentes/videos and saves new public uploads into the Files app. Shorts, livestreams, and the All tab are not downloaded. No App Store account and no paid signing entitlements.",
+      "iconURL": "https://raw.githubusercontent.com/ry-pi/fuentes-archive/source/icon-1024.png",
+      "tintColor": "DB2933",
+      "category": "entertainment",
+      "versions": [
+        {
+          "version": "1.10.0",
+          "buildVersion": "11",
+          "date": "2026-11-28T20:00:00Z",
+          "localizedDescription": "Light, Dark, and OLED themes with one red accent. Settings drops the search bar and info-only rows. Titles sit on the same row as the toolbar buttons. Imported videos no longer show a quality when the file is gone. New app icon.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.10.0-11/FuentesArchive-unsigned.ipa",
+          "size": 1013976,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.9.0",
+          "buildVersion": "10",
+          "date": "2026-11-25T03:10:00Z",
+          "localizedDescription": "Settings has a Playback section for background audio, Picture in Picture, skip interval, headphones, interruptions, resume position, and default speed. The Settings tab is grouped into Downloads, Playback, Storage, Notifications, Widgets, Data, and About.\n\nAlso includes 1.8.0:\nPaste any Rumble link to archive it, including other channels and live replays. Playback continues in the background with lock screen controls, and video can move into Picture in Picture. Every tab uses the same title and toolbar layout.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.9.0-10/FuentesArchive-unsigned.ipa",
+          "size": 1284889,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.7.0",
+          "buildVersion": "8",
+          "date": "2026-11-24T12:00:00Z",
+          "localizedDescription": "Restores the dark theme with a red accent and the previous app icon. Settings is a tab. Download progress, the wide widget, Live Activity, and library import/export stay. Fixes saved-file deletion, duplicate starts, and a Live Activity that could stick after a download finished.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.7.0-8/FuentesArchive-unsigned.ipa",
+          "size": 1202513,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.6.0",
+          "buildVersion": "7",
+          "date": "2026-11-19T18:30:00Z",
+          "localizedDescription": "Download rows and the Live Activity show real megabytes. A wide widget switches between progress and recent videos. Red, white, and blue redesign with a new AF icon. Settings can export and import library data.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.6.0-7/FuentesArchive-unsigned.ipa",
+          "size": 909117,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.5.0",
+          "buildVersion": "6",
+          "date": "2026-11-18T23:50:00Z",
+          "localizedDescription": "Home screen and lock screen widgets, plus a Live Activity for the download in progress. The widget extension is included in the unsigned IPA.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.5.0-6/FuentesArchive-unsigned.ipa",
+          "size": 1154658,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.4.0",
+          "buildVersion": "5",
+          "date": "2026-11-18T21:00:00Z",
+          "localizedDescription": "Auto-download settings for quality, audio-only, Wi-Fi, schedule, and cleanup. iOS 26 shows download progress as a system task. Last sync shows the date and time. The Downloads tab shows app and media storage.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.4.0-5/FuentesArchive-unsigned.ipa",
+          "size": 1001782,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.3.0",
+          "buildVersion": "4",
+          "date": "2026-11-12T16:00:00Z",
+          "localizedDescription": "Audio plays through the silent switch and on the lock screen. New Player tab lists finished downloads, with resume, speed, and 15-second skip.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.3.0-4/FuentesArchive-unsigned.ipa",
+          "size": 941442,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.2.0",
+          "buildVersion": "3",
+          "date": "2026-11-12T02:30:00Z",
+          "localizedDescription": "Downloads prefer a single progressive MP4. HLS is only the fallback and runs up to 8 pieces at once. File sizes come from Rumble's format metadata instead of the playlist. Settings includes a debug log.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.2.0-3/FuentesArchive-unsigned.ipa",
+          "size": 867944,
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.1.0",
+          "buildVersion": "2",
+          "date": "2026-11-12T02:00:00Z",
+          "localizedDescription": "Tap a video for download options (every quality or audio-only, with file sizes). New Downloads tab with pause, resume, stop, and Pause All.",
+          "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.1.0-2/FuentesArchive-unsigned.ipa",
+          "size": 847108,
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSPhotoLibraryAddUsageDescription": "Optional. Copies a finished download into Photos when that setting is on. The file is always kept in the Files app."
+        }
+      },
+      "version": "1.10.0",
+      "versionDate": "2026-11-28T20:00:00Z",
+      "downloadURL": "https://github.com/ry-pi/fuentes-archive/releases/download/v1.10.0-11/FuentesArchive-unsigned.ipa",
+      "size": 1013976
+    }
+  ],
+  "news": [],
+  "identifier": "io.github.ry-pi.fuentes-archive",
+  "sourceURL": "https://raw.githubusercontent.com/ry-pi/fuentes-archive/source/apps.json"
+}
